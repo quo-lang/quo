@@ -1,0 +1,22 @@
+# Testing global and local variables, loop, if / else if / else.
+
+var utils = import("utils")
+var assert = utils.assert
+
+var fizz_count = 0
+var buzz_count = 0
+var fizzbuzz_count = 0
+
+loop (var i = 0, i <= 100, i += 1) {
+    if i % 15 == 0 {
+        fizzbuzz_count += 1
+    } else if i % 3 == 0 {
+        fizz_count += 1
+    } else if i % 5 == 0 {
+        buzz_count += 1
+    }
+}
+
+assert(fizz_count == 27)
+assert(buzz_count == 14)
+assert(fizzbuzz_count == 7)

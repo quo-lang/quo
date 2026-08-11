@@ -1,0 +1,17 @@
+var utils = import("utils")
+var assert = utils.assert
+
+# Integers
+assert(5 > 3 == true)
+assert(3 > 5 == false)
+assert(5 >= 5 == true)
+assert(4 >= 5 == false)
+assert(3 < 5 == true)
+assert(5 < 3 == false)
+assert(5 <= 5 == true)
+assert(5 <= 4 == false)
+
+assert(5 == 5 == true)
+assert(5 == 3 == false)
+assert(5 != 3 == true)
+assert(5 != 5 == false)

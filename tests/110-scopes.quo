@@ -1,0 +1,14 @@
+var utils = import("utils")
+var assert = utils.assert
+
+# Variable shadowing within scopes
+var a = 69
+{
+    var a = 420
+    {
+        var a = 1337
+        assert(a == 1337)
+    }
+    assert(a == 420)
+}
+assert(a == 69)

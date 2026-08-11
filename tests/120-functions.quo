@@ -1,0 +1,12 @@
+var utils = import("utils")
+var assert = utils.assert
+
+# Recursive Fibonacci
+var fib = fn(n) {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+assert(fib(10) == 55)

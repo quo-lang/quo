@@ -1,0 +1,11 @@
+var utils = import("utils")
+var assert = utils.assert
+
+assert(true and true == true)
+assert(true and false == false)
+assert(!(false and false == false))
+assert(true or true == true)
+assert(true or false == true)
+assert(false or false == false)
+assert(!true == false)
+assert(!false == true)

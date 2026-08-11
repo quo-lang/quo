@@ -1,0 +1,23 @@
+var utils = import("utils")
+var assert = utils.assert
+
+var a = "foo"
+var b = "bar"
+
+assert(a == "foo")
+assert(b == "bar")
+assert(a + b == "foobar")
+
+var c = b
+b = a
+
+assert(c == "bar")
+assert(b == "foo")
+
+# Reassign different types
+
+a = 69
+b = 4.20
+
+assert(a == 69)
+assert(b == 4.20)

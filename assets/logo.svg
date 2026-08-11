@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" xmlns:bx="https://boxy-svg.com">
+  <defs>
+    <bx:grid x="0" y="0" width="71.587" height="71.587" divisions="1"/>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="384.036" y1="341.482" x2="384.036" y2="376.312" id="gradient-0" gradientTransform="matrix(0.702988, -0.711202, 8.221299, 8.221302, -2862.637399, -2319.538684)">
+      <stop offset="0" style="stop-color: rgb(117, 0, 218);"/>
+      <stop offset="1" style=""/>
+    </linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="250.169" y1="125.128" x2="250.169" y2="375.237" id="gradient-1" gradientTransform="matrix(0.71035, -0.70385, 1.431116, 1.431116, -285.193021, 68.595558)">
+      <stop offset="0" style="stop-color: rgb(218, 108, 163);"/>
+      <stop offset="1" style="stop-color: rgb(0, 1, 141);"/>
+    </linearGradient>
+  </defs>
+  <path d="M 250.169 250.161 m -125.084 0 a 125.084 125.033 0 1 0 250.168 0 a 125.084 125.033 0 1 0 -250.168 0 Z M 250.169 250.161 m -96.74 0 a 96.74 96.74 0 0 1 193.48 0 a 96.74 96.74 0 0 1 -193.48 0 Z" bx:shape="ring 250.169 250.161 96.74 96.74 125.084 125.033 1@9407450b" style="stroke: rgb(0, 0, 0); fill-rule: nonzero; paint-order: fill; fill: url(&quot;#gradient-1&quot;); stroke-width: 0px;"/>
+  <path style="stroke: rgb(0, 0, 0); fill: url(&quot;#gradient-0&quot;); stroke-width: 0px;" d="M 328.468 359.384 C 328.468 359.384 343.48 330.311 386.314 346.264 C 429.148 362.218 438.467 350.996 439.544 351.533 C 440.621 352.07 427.602 374.795 385.215 376.228 C 342.828 377.662 328.909 360.298 328.468 359.384 Z"/>
+  <g transform="matrix(0.284215, 0, 0, 0.284215, 325.783478, 247.00737)"/>
+</svg>

@@ -1,0 +1,17 @@
+var utils = import("utils")
+var assert = utils.assert
+
+assert(true == true)
+assert(false == false)
+
+assert(0 == false)
+assert(1 == true)
+
+assert(0.0 == false)
+assert(1.0 == true)
+
+assert("foo" == true)
+assert("" == false)
+
+assert(nil == false)
+assert(nil != true)

@@ -1,0 +1,5 @@
+# Utils module for tests
+
+return {
+    "assert": fn(condition) { if !condition exit(1) }
+}

@@ -1,0 +1,10 @@
+var utils = import("utils")
+var assert = utils.assert
+
+assert("foo" == "foo")
+assert("hello" != "world")
+assert("foo" + "bar" == "foobar")
+assert("foo" * 3 == "foofoofoo")
+assert("foo" + 69 == "foo69")
+assert(69 + "foo" == "69foo")
+assert(69.420 + "foo" == "69.42foo")
