@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="assets/logo.svg" alt="Quo Logo">
+    <img src="assets/logo.svg" alt="Quo Logo" width=200 height=200>
     <h1>Quo</h1>
 </div>
 
