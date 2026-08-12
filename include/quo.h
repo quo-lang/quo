@@ -340,7 +340,7 @@ static inline QuoDict *quo_obj_as_dict(const QuoObj *o) { return (QuoDict *)o; }
 typedef struct {
   QuoObj obj;
   QuoStr *name;
-  int64_t arity; // -1 for variadic
+  int32_t arity; // -1 for variadic
   da(uint64_t) instructions;
   da(QuoVar) constants;
 } QuoFn;

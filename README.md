@@ -28,7 +28,9 @@ To build `quo` CLI run:
 - [Getting Started](#getting-started)
   - [File Format](#file-format)
   - [Command-line Tool](#command-line-tool)
-  - [Hello, World](#hello-world)
+  - [Quick Examples](#quick-examples)
+    - [Hello, World](#hello-world)
+    - [Structs](#structs)
 - [Language Reference](#language-reference)
   - [Comments](#comments)
   - [Keywords](#keywords)
@@ -62,12 +64,31 @@ Run script:
 $ quo script.quo
 ```
 
-### Hello, World
+### Quick Examples
 
-Here's a simple `"Hello, World!"` program in Quo:
+#### Hello, World
 
 ```go
 print("Hello, World!")
+```
+
+#### Structs
+
+Quo doesn't have a struct type, but structs can be easily created using functions as constructors which return a dictionary.
+Think of the returned dict as `self`, and because functions defined in dictionaries recieve this dictionary as first argument it's all works out.
+
+```js
+var struct = fn(name) {
+    return {
+        "name": name,
+        "speak": fn(self, text) {
+            print(self.name, "says \"" + text + "\"")
+        }
+    }
+}
+
+var cat = struct("Cat")
+cat.speak("meow") # Cat says "meow"
 ```
 
 ## Language Reference
