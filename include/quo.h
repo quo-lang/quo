@@ -1762,6 +1762,11 @@ static QuoVar quo__dict_method_set(QuoState *s, int64_t argc, QuoVar *argv) {
   quo_dict_set(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]), &argv[2]);
   return quo_var_new_nil();
 }
+static QuoVar quo__dict_method_has(QuoState *s, int64_t argc, QuoVar *argv) {
+  if (argc != 2 && !quo_var_is_str(&argv[1])) return quo_var_new_err("has() requires key string argument");
+  QuoVar val = quo_dict_get(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]));
+  return quo_var_new_bool(!quo_var_is_nil(&val));
+}
 static QuoVar quo__dict_method_keys(QuoState *s, int64_t argc, QuoVar *argv) {
   if (argc != 1) return quo_var_new_err("keys() requires no arguments");
   QuoArr *keys = quo_arr_new();
@@ -1862,6 +1867,7 @@ QuoState *quo_state_new(const char *cwd) {
   quo__register_builtin_method(s, &s->dict_methods, "len", quo__method_len);
   quo__register_builtin_method(s, &s->dict_methods, "get", quo__dict_method_get);
   quo__register_builtin_method(s, &s->dict_methods, "set", quo__dict_method_set);
+  quo__register_builtin_method(s, &s->dict_methods, "has", quo__dict_method_has);
   quo__register_builtin_method(s, &s->dict_methods, "keys", quo__dict_method_keys);
 
   return s;
