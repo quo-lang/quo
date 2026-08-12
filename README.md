@@ -30,7 +30,7 @@ To build `quo` CLI run:
   - [Command-line Tool](#command-line-tool)
   - [Quick Examples](#quick-examples)
     - [Hello, World](#hello-world)
-    - [Structs](#structs)
+    - [Object-Oriented Programming](#object-oriented-programming)
 - [Language Reference](#language-reference)
   - [Comments](#comments)
   - [Keywords](#keywords)
@@ -72,22 +72,47 @@ $ quo script.quo
 print("Hello, World!")
 ```
 
-#### Structs
+#### Object-Oriented Programming
 
-Quo doesn't have a struct type, but structs can be easily created using functions as constructors which return a dictionary.
+Quo doesn't have a `class` type, but classes can be easily created using functions as constructors which return a dictionary.
 Think of the returned dict as `self`, and because functions defined in dictionaries recieve this dictionary as first argument it's all works out.
+We can implement inheritance by creating explicit `inherit(super_class)` function.
 
-```js
-var struct = fn(name) {
+```go
+# Create a new "class" with the given name
+var class = fn(name) {
     return {
         "name": name,
-        "speak": fn(self, text) {
-            print(self.name, "says \"" + text + "\"")
+
+        # Create function to inherit fields from other "classes"
+        "inherit": fn(self, super) {
+            # Get all keys from super "class" and set them on self
+            if super and type(super) == "dict" {
+                var keys = super.keys()
+                loop (var i = 0, i < keys.len(), i += 1) {
+                    var key = keys.get(i)
+                    # Do not set keys that already exist on self
+                    if self.has(key) continue
+                    self.set(key, super.get(key))
+                }
+            }
         }
     }
 }
 
-var cat = struct("Cat")
+# Create Animal class and add speak() method
+var animal_class = fn() {
+    var self = class("Animal")
+    self.set("speak", fn(self, text) { print(self.name + " says \"" + text + "\"") })
+    return self
+}
+
+# Create class instance
+var cat = class("Cat")
+
+# Inherit methods from Animal class
+cat.inherit(animal_class())
+
 cat.speak("meow") # Cat says "meow"
 ```
 
