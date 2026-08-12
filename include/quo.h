@@ -386,7 +386,7 @@ typedef struct QuoState {
 typedef struct QuoParser {
   QuoState *s;
   // Lexer
-  int pos, line, column;
+  int32_t pos, line, column;
   // Current file
   char *file_name;
   char *file_path;
@@ -597,12 +597,12 @@ bool quo_tokens_eq(QuoToken t1, QuoToken t2);
 
 // --- DEBUG --- //
 
-void quo_debug_expression_print(QuoExpr *expr, int indent);
-void quo_debug_statement_print(QuoStmt *stmt, int indent);
+void quo_debug_expression_print(QuoExpr *expr, int32_t indent);
+void quo_debug_statement_print(QuoStmt *stmt, int32_t indent);
 void quo_debug_ast_print(QuoAST *ast);
 void quo_debug_function_disassemble(QuoFn *fn);
 static const char *quo__debug_op_str(QuoOP op);
-int quo_debug_instruction_disassemble(QuoFn *fn, int offset);
+int32_t quo_debug_instruction_disassemble(QuoFn *fn, int32_t offset);
 
 // -------------------- MEMORY -------------------- //
 
@@ -643,7 +643,7 @@ char *quo_strdupf(const char *fmt, ...) {
   // Determine required length (+1 for NULL)
   va_start(ap, fmt);
   va_copy(ap2, ap);
-  int needed = vsnprintf(NULL, 0, fmt, ap2);
+  int32_t needed = vsnprintf(NULL, 0, fmt, ap2);
   va_end(ap2);
   if (needed < 0) {
     va_end(ap);
@@ -666,7 +666,7 @@ char *quo_strdupf(const char *fmt, ...) {
 int64_t quo_strtoll(const char *s, uint64_t len) {
   char buffer[len + 1];
   buffer[0] = '\0';
-  for (int i = 0; i < len; i++) {
+  for (int32_t i = 0; i < len; i++) {
     char c = s[i];
     if (c >= '0' && c <= '9') strncat(buffer, &c, 1);
   }
@@ -677,7 +677,7 @@ double quo_strtod(const char *s, uint64_t len) {
   char buffer[len + 1];
   buffer[0] = '\0';
   bool has_dot = false;
-  for (int i = 0; i < len; i++) {
+  for (int32_t i = 0; i < len; i++) {
     char c = s[i];
     if (c >= '0' && c <= '9') strncat(buffer, &c, 1);
     else if (c == '.') {
@@ -814,7 +814,7 @@ static void quo__ht_adjust_capacity(QuoHashTable *t, uint64_t capacity) {
   if (t->capacity == 0) capacity = 8;
   QuoHashTableEntry *entries = quo_alloc(NULL, sizeof(*entries) * capacity);
   t->count = 0;
-  for (int i = 0; i < t->capacity; i++) {
+  for (int32_t i = 0; i < t->capacity; i++) {
     QuoHashTableEntry *entry = &t->items[i];
     if (entry->key == NULL) continue;
     QuoHashTableEntry *dest = quo__ht_find_entry(entries, capacity, entry->key);
@@ -829,7 +829,7 @@ static void quo__ht_adjust_capacity(QuoHashTable *t, uint64_t capacity) {
 
 unsigned long quo_hash(const char *str, uint64_t len) {
   unsigned long hash = 5381;
-  int c;
+  int32_t c;
   while (len--) {
     c = *str++;
     hash = ((hash << 5) + hash) + c;
@@ -899,7 +899,7 @@ bool quo__is_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '
 bool lexer__is_digit(char c) { return c >= '0' && c <= '9'; }
 bool lexer__is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 bool lexer__is_alphanumeric(char c) { return lexer__is_alpha(c) || lexer__is_digit(c); }
-char lexer__peek(QuoParser *p, int offset) { return p->source[p->pos + offset]; }
+char lexer__peek(QuoParser *p, int32_t offset) { return p->source[p->pos + offset]; }
 void lexer__advance(QuoParser *p) {
   p->pos++;
   if (lexer__peek(p, 0) == '\n') p->line++, p->column = 1;
@@ -924,7 +924,7 @@ QuoToken quo_parser_next_token(QuoParser *p) {
       t.start = p->source + start;
       t.len = p->pos - start;
       // Find keywords
-      for (int i = 0; i < quo__static_array_size(quo__keywords); ++i) {
+      for (int32_t i = 0; i < quo__static_array_size(quo__keywords); ++i) {
         size_t len = strlen(quo_token_type_str(quo__keywords[i]));
         if (len == t.len && memcmp(t.start, quo_token_type_str(quo__keywords[i]), len) == 0) {
           t.type = quo__keywords[i];
@@ -1106,7 +1106,7 @@ void quo_obj_unref(QuoObj *obj) {
   }
   case QUO_OBJ_TYPE_FN: {
     QuoFn *fn = quo_obj_as_fn(obj);
-    for (int i = 0; i < da_count(&fn->constants); i++) quo_var_unref(&da_at(&fn->constants, i));
+    for (int32_t i = 0; i < da_count(&fn->constants); i++) quo_var_unref(&da_at(&fn->constants, i));
     da_free(&fn->instructions);
     da_free(&fn->constants);
     break;
@@ -1120,7 +1120,7 @@ void quo_obj_unref(QuoObj *obj) {
 
 // --- STRING FUNCTIONS --- //
 
-static inline QuoStr *quo__find_string(QuoHashTable *table, const char *chars, int length, uint32_t hash) {
+static inline QuoStr *quo__find_string(QuoHashTable *table, const char *chars, int32_t length, uint32_t hash) {
   if (table->count == 0) return NULL;
   uint32_t index = hash & (table->capacity - 1);
   for (;;) {
@@ -1798,7 +1798,7 @@ static QuoObj *quo__method_lookup(QuoState *s, QuoVar *val, QuoStr *name) {
 // ------------------------------ STATE ------------------------------ //
 
 QuoState *quo_state_new(const char *cwd) {
-  srand((unsigned int)time(NULL));
+  srand((uint32_t)time(NULL));
 
   QuoState *s = quo_alloc(NULL, sizeof(QuoState));
 
@@ -2002,16 +2002,16 @@ static void quo__parser_end_scope(QuoParser *p) {
 static bool quo__parser_is_declared_in_current_scope(QuoParser *p, QuoToken name) {
   if (da_count(&p->scopes) == 0) return false;
   QuoTokenList *current_scope = &da_at(&p->scopes, da_count(&p->scopes) - 1);
-  for (int i = 0; i < da_count(current_scope); i++)
+  for (int32_t i = 0; i < da_count(current_scope); i++)
     if (quo_tokens_eq(da_at(current_scope, i), name)) return true;
   return false;
 }
 
 // Search from innermost to outermost scope
 static bool quo__parser_is_declared(QuoParser *p, QuoToken name) {
-  for (int s = da_count(&p->scopes) - 1; s >= 0; s--) {
+  for (int32_t s = da_count(&p->scopes) - 1; s >= 0; s--) {
     QuoTokenList *scope = &da_at(&p->scopes, s);
-    for (int i = 0; i < da_count(scope); i++)
+    for (int32_t i = 0; i < da_count(scope); i++)
       if (quo_tokens_eq(da_at(scope, i), name)) return true;
   }
   return false;
@@ -2021,7 +2021,7 @@ static bool quo__parser_is_declared(QuoParser *p, QuoToken name) {
 static bool quo__parser_is_global(QuoParser *p, QuoToken name) {
   if (da_count(&p->scopes) == 0) return false;
   QuoTokenList *global_scope = &da_at(&p->scopes, 0);
-  for (int i = 0; i < da_count(global_scope); i++)
+  for (int32_t i = 0; i < da_count(global_scope); i++)
     if (quo_tokens_eq(da_at(global_scope, i), name)) return true;
   return false;
 }
@@ -2062,7 +2062,7 @@ static void quo__expr_free(QuoExpr *expr) {
   case QUO_EXPR_LITERAL:
   case QUO_EXPR_VARIABLE: break;
   case QUO_EXPR_ARRAY:
-    for (int i = 0; i < da_count(&expr->array.elements); i++) quo__expr_free(da_at(&expr->array.elements, i));
+    for (int32_t i = 0; i < da_count(&expr->array.elements); i++) quo__expr_free(da_at(&expr->array.elements, i));
     da_free(&expr->array.elements);
     break;
   case QUO_EXPR_BINARY:
@@ -2073,7 +2073,7 @@ static void quo__expr_free(QuoExpr *expr) {
   case QUO_EXPR_GROUPING: quo__expr_free(expr->unary.expr); break;
   case QUO_EXPR_CALL:
     quo__expr_free(expr->call.callee);
-    for (int i = 0; i < da_count(&expr->call.arguments); i++) quo__expr_free(da_at(&expr->call.arguments, i));
+    for (int32_t i = 0; i < da_count(&expr->call.arguments); i++) quo__expr_free(da_at(&expr->call.arguments, i));
     da_free(&expr->call.arguments);
     break;
   case QUO_EXPR_ASSIGN:
@@ -2087,7 +2087,7 @@ static void quo__expr_free(QuoExpr *expr) {
     break;
   case QUO_EXPR_MEMBER_ACCESS: quo__expr_free(expr->member_access.object); break;
   case QUO_EXPR_DICT:
-    for (int i = 0; i < da_count(&expr->dict.pairs); i++) quo__expr_free(da_at(&expr->dict.pairs, i).value);
+    for (int32_t i = 0; i < da_count(&expr->dict.pairs); i++) quo__expr_free(da_at(&expr->dict.pairs, i).value);
     da_free(&expr->dict.pairs);
     break;
   case QUO_EXPR_FUNCTION:
@@ -2409,7 +2409,7 @@ static void quo__stmt_free(QuoStmt *stmt) {
     if (stmt->loop.body) quo__stmt_free(stmt->loop.body);
     break;
   case QUO_STMT_BLOCK:
-    for (int i = 0; i < da_count(&stmt->block); i++) quo__stmt_free(da_at(&stmt->block, i));
+    for (int32_t i = 0; i < da_count(&stmt->block); i++) quo__stmt_free(da_at(&stmt->block, i));
     da_free(&stmt->block);
     break;
   case QUO_STMT_VAR_DECL:
@@ -2615,7 +2615,7 @@ bool quo_parser_parse(QuoParser *p) {
 
 void quo_parser_free(QuoParser *p) {
   if (!p) return;
-  for (int i = 0; i < da_count(&p->ast); i++) quo__stmt_free(da_at(&p->ast, i));
+  for (int32_t i = 0; i < da_count(&p->ast); i++) quo__stmt_free(da_at(&p->ast, i));
   da_free(&p->ast);
   while (da_count(&p->scopes) > 0) {
     da_free(&da_at(&p->scopes, da_count(&p->scopes) - 1));
@@ -2633,7 +2633,7 @@ void quo_parser_free(QuoParser *p) {
 static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *stmt);
 
 static bool quo__compiler_is_global_declared(QuoCompiler *c, QuoToken name) {
-  for (int i = 0; i < da_count(&c->declared_globals); i++)
+  for (int32_t i = 0; i < da_count(&c->declared_globals); i++)
     if (quo_tokens_eq(da_at(&c->declared_globals, i), name)) return true;
   return false;
 }
@@ -2697,7 +2697,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
     break;
   }
   case QUO_EXPR_ARRAY: {
-    for (int i = 0; i < da_count(&e->array.elements); i++) quo__compiler_expr(c, da_at(&e->array.elements, i));
+    for (int32_t i = 0; i < da_count(&e->array.elements); i++) quo__compiler_expr(c, da_at(&e->array.elements, i));
     quo__function_push_instruction(c->fn, QUO_OP_ARRAY);
     quo__function_push_instruction(c->fn, da_count(&e->array.elements));
     break;
@@ -2706,7 +2706,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
     // Push the number of pairs
     uint64_t pair_count = da_count(&e->dict.pairs);
     // Compile each key-value pair
-    for (int i = 0; i < pair_count; i++) {
+    for (int32_t i = 0; i < pair_count; i++) {
       QuoExprDictPair pair = da_at(&e->dict.pairs, i);
       // Push key
       QuoVar key_var = quo_var_new_obj(quo_str_new(c->s, pair.key.start, pair.key.len));
@@ -2740,7 +2740,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
     QuoCompiler *fn_compiler = quo_compiler_new(c->s, e->function.name.start, e->function.name.len);
     fn_compiler->fn->arity = da_count(&e->function.parameters);
     quo__compiler_begin_scope(fn_compiler);
-    for (int i = 0; i < da_count(&e->function.parameters); i++) {
+    for (int32_t i = 0; i < da_count(&e->function.parameters); i++) {
       QuoToken param = da_at(&e->function.parameters, i);
       quo__compiler_add_local_variable(fn_compiler, param);
       da_at(&fn_compiler->locals, da_count(&fn_compiler->locals) - 1).depth = fn_compiler->scope_depth;
@@ -2961,7 +2961,7 @@ static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
   }
   case QUO_STMT_BLOCK: {
     quo__compiler_begin_scope(c);
-    for (int i = 0; i < da_count(&s->block); i++) quo__compiler_stmt(c, da_at(&s->block, i));
+    for (int32_t i = 0; i < da_count(&s->block); i++) quo__compiler_stmt(c, da_at(&s->block, i));
     quo__compiler_end_scope(c);
     break;
   }
@@ -3020,13 +3020,13 @@ static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
     // Store the end position for break patching
     uint64_t end_pos = da_count(&c->fn->instructions);
     // Patch all break jumps to this position (after the loop)
-    for (int i = 0; i < da_count(&loop_ctx.breaks); i++) {
+    for (int32_t i = 0; i < da_count(&loop_ctx.breaks); i++) {
       uint64_t break_jump = da_at(&loop_ctx.breaks, i);
       uint64_t offset = end_pos - break_jump - 1;
       da_at(&c->fn->instructions, break_jump) = offset;
     }
     // Patch all continue jumps to the increment section
-    for (int i = 0; i < da_count(&loop_ctx.continues); i++) {
+    for (int32_t i = 0; i < da_count(&loop_ctx.continues); i++) {
       uint64_t continue_jump = da_at(&loop_ctx.continues, i);
       uint64_t offset = increment_start - continue_jump - 1;
       da_at(&c->fn->instructions, continue_jump) = offset;
@@ -3103,7 +3103,7 @@ static inline QuoVar quo__vm_pop(QuoVM *vm) {
   assert(da_count(&vm->stack) > 0);
   return da_pop(&vm->stack);
 }
-static inline QuoVar *quo__vm_peek(QuoVM *vm, int distance) { return quo__vm_stack_top(vm) - 1 - distance; }
+static inline QuoVar *quo__vm_peek(QuoVM *vm, int32_t distance) { return quo__vm_stack_top(vm) - 1 - distance; }
 // Creates a new call frame for a user-defined function
 static bool quo__vm_call_fn(QuoVM *vm, QuoFn *fn, uint64_t argc) {
   if (fn->arity != -1 && fn->arity != argc) return false;
@@ -3169,7 +3169,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
 #ifdef QUO_DEBUG
     printf("%-17s", quo__debug_op_str(instruction));
     printf("[ ");
-    for (int i = 0; i < da_count(&vm->stack); i++) {
+    for (int32_t i = 0; i < da_count(&vm->stack); i++) {
       QuoVar *v = &da_at(&vm->stack, i);
       quo_var_print(v);
       if (i != da_count(&vm->stack) - 1) printf(" | ");
@@ -3471,18 +3471,18 @@ void quo_vm_free(QuoVM *vm) {
 
 // -------------------- DEBUG -------------------- //
 
-void quo_debug_expression_print(QuoExpr *expr, int indent) {
+void quo_debug_expression_print(QuoExpr *expr, int32_t indent) {
   if (!expr) return;
-  for (int i = 0; i < indent; i++) printf("  ");
+  for (int32_t i = 0; i < indent; i++) printf("  ");
   switch (expr->type) {
   case QUO_EXPR_LITERAL: printf("LITERAL: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(expr->token)); break;
   case QUO_EXPR_ARRAY:
     printf("ARRAY:\n");
-    for (int i = 0; i < expr->array.elements.count; i++) quo_debug_expression_print(da_at(&expr->array.elements, i), indent + 1);
+    for (int32_t i = 0; i < expr->array.elements.count; i++) quo_debug_expression_print(da_at(&expr->array.elements, i), indent + 1);
     break;
   case QUO_EXPR_DICT:
     printf("DICT:\n");
-    for (int i = 0; i < expr->dict.pairs.count; i++) {
+    for (int32_t i = 0; i < expr->dict.pairs.count; i++) {
       QuoExprDictPair pair = da_at(&expr->dict.pairs, i);
       printf("\"" QUO_TOKEN_FMT "\": ", QUO_TOKEN_ARG(pair.key));
       quo_debug_expression_print(pair.value, indent + 1);
@@ -3504,14 +3504,14 @@ void quo_debug_expression_print(QuoExpr *expr, int indent) {
     break;
   case QUO_EXPR_CALL:
     printf("CALL:\n");
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("CALLEE:\n");
     quo_debug_expression_print(expr->call.callee, indent + 2);
     if (da_count(&expr->call.arguments) > 0) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
+      for (int32_t i = 0; i < indent + 1; i++) printf("  ");
       printf("ARGUMENTS:\n");
-      for (int i = 0; i < da_count(&expr->call.arguments); i++) {
-        for (int j = 0; j < indent + 2; j++) printf("  ");
+      for (int32_t i = 0; i < da_count(&expr->call.arguments); i++) {
+        for (int32_t j = 0; j < indent + 2; j++) printf("  ");
         printf("ARG %d:\n", i);
         quo_debug_expression_print(da_at(&expr->call.arguments, i), indent + 3);
       }
@@ -3524,40 +3524,40 @@ void quo_debug_expression_print(QuoExpr *expr, int indent) {
     break;
   case QUO_EXPR_TERNARY:
     printf("TERNARY:\n");
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("COND:\n");
     quo_debug_expression_print(expr->ternary.condition, indent + 2);
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("THEN:\n");
     quo_debug_expression_print(expr->ternary.then_expr, indent + 2);
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("ELSE:\n");
     quo_debug_expression_print(expr->ternary.else_expr, indent + 2);
     break;
   case QUO_EXPR_MEMBER_ACCESS:
     printf("MEMBER ACCESS:\n");
     quo_debug_expression_print(expr->member_access.object, indent + 1);
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("MEMBER: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(expr->member_access.member));
     break;
   case QUO_EXPR_FUNCTION:
     printf("FUNCTION:\n");
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("NAME: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(expr->function.name));
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("PARAMS:\n");
-    for (int i = 0; i < da_count(&expr->function.parameters); i++) {
+    for (int32_t i = 0; i < da_count(&expr->function.parameters); i++) {
       QuoToken param = da_at(&expr->function.parameters, i);
-      for (int j = 0; j < indent + 2; j++) printf("  ");
+      for (int32_t j = 0; j < indent + 2; j++) printf("  ");
       printf(QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(param));
     }
     break;
   }
 }
 
-void quo_debug_statement_print(QuoStmt *stmt, int indent) {
+void quo_debug_statement_print(QuoStmt *stmt, int32_t indent) {
   if (!stmt) return;
-  for (int i = 0; i < indent; i++) printf("  ");
+  for (int32_t i = 0; i < indent; i++) printf("  ");
   switch (stmt->type) {
   case QUO_STMT_VAR_DECL:
     printf("VAR_DECL: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(stmt->var_decl.name));
@@ -3572,20 +3572,20 @@ void quo_debug_statement_print(QuoStmt *stmt, int indent) {
     if (stmt->expression) {
       quo_debug_expression_print(stmt->expression, indent + 1);
     } else {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
+      for (int32_t i = 0; i < indent + 1; i++) printf("  ");
       printf("void\n");
     }
     break;
   case QUO_STMT_IF:
     printf("IF:\n");
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("COND:\n");
     quo_debug_expression_print(stmt->if_stmt.condition, indent + 2);
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     printf("THEN:\n");
     quo_debug_statement_print(stmt->if_stmt.then_branch, indent + 2);
     if (stmt->if_stmt.else_branch) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
+      for (int32_t i = 0; i < indent + 1; i++) printf("  ");
       printf("ELSE:\n");
       quo_debug_statement_print(stmt->if_stmt.else_branch, indent + 2);
     }
@@ -3593,21 +3593,21 @@ void quo_debug_statement_print(QuoStmt *stmt, int indent) {
   case QUO_STMT_LOOP:
     printf("LOOP:\n");
     if (stmt->loop.initializer) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
+      for (int32_t i = 0; i < indent + 1; i++) printf("  ");
       printf("INIT:\n");
       quo_debug_statement_print(stmt->loop.initializer, indent + 2);
     }
     if (stmt->loop.condition) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
+      for (int32_t i = 0; i < indent + 1; i++) printf("  ");
       printf("COND:\n");
       quo_debug_expression_print(stmt->loop.condition, indent + 2);
     }
     if (stmt->loop.increment) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
+      for (int32_t i = 0; i < indent + 1; i++) printf("  ");
       printf("INCR:\n");
       quo_debug_statement_print(stmt->loop.increment, indent + 2);
     }
-    for (int i = 0; i < indent + 1; i++) printf("  ");
+    for (int32_t i = 0; i < indent + 1; i++) printf("  ");
     if (da_count(&stmt->loop.body->block) == 0) break;
     printf("BODY:\n");
     quo_debug_statement_print(stmt->loop.body, indent + 2);
@@ -3617,14 +3617,14 @@ void quo_debug_statement_print(QuoStmt *stmt, int indent) {
   case QUO_STMT_BLOCK:
     if (da_count(&stmt->block) == 0) break;
     printf("BLOCK:\n");
-    for (int i = 0; i < da_count(&stmt->block); i++) quo_debug_statement_print(da_at(&stmt->block, i), indent + 1);
+    for (int32_t i = 0; i < da_count(&stmt->block); i++) quo_debug_statement_print(da_at(&stmt->block, i), indent + 1);
     break;
   }
 }
 
 void quo_debug_ast_print(QuoAST *ast) {
   printf("\n============= AST: ===============\n\n");
-  for (int i = 0; i < da_count(ast); i++) {
+  for (int32_t i = 0; i < da_count(ast); i++) {
     quo_debug_statement_print(da_at(ast, i), 0);
     printf("\n");
   }
@@ -3632,17 +3632,17 @@ void quo_debug_ast_print(QuoAST *ast) {
 }
 
 void quo_debug_function_disassemble(QuoFn *fn) {
-  int len = printf("========== FUNCTION '%s' DISSASSEMBLY ==========\n", fn->name->data);
+  int32_t len = printf("========== FUNCTION '%s' DISSASSEMBLY ==========\n", fn->name->data);
   printf("CONSTANTS (%d):\n", da_count(&fn->constants));
-  for (int i = 0; i < da_count(&fn->constants); i++) {
+  for (int32_t i = 0; i < da_count(&fn->constants); i++) {
     printf("%d: ", i);
     quo_var_print(&da_at(&fn->constants, i));
     printf("\n");
   }
   printf("\n");
   printf("INSTRUCTIONS (%d):\n", da_count(&fn->instructions));
-  for (int i = 0; i < da_count(&fn->instructions);) i = quo_debug_instruction_disassemble(fn, i);
-  for (int i = 0; i < len; i++) printf("=");
+  for (int32_t i = 0; i < da_count(&fn->instructions);) i = quo_debug_instruction_disassemble(fn, i);
+  for (int32_t i = 0; i < len; i++) printf("=");
   printf("\n");
 }
 
@@ -3681,7 +3681,7 @@ static const char *quo__debug_op_str(QuoOP op) {
   }
 }
 
-int quo_debug_instruction_disassemble(QuoFn *fn, int offset) {
+int32_t quo_debug_instruction_disassemble(QuoFn *fn, int32_t offset) {
   printf("%04d: ", offset);
   QuoOP instruction = da_at(&fn->instructions, offset);
   offset++;
