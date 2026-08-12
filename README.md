@@ -328,6 +328,8 @@ They are accessed using the dot notation: `value.method()`.
   - `len()`: Returns the number of key-value pairs in the dictionary.
   - `get(key)`: Returns the value associated with `key` in the dictionary.
   - `set(key, value)`: Sets the value associated with `key` in the dictionary.
+  - `values()`: Returns an array of all values in the dictionary.
+  - `keys()`: Returns an array of all keys in the dictionary.
 - `arr`:
   - `len()`: Returns the length of the array.
   - `get(n)`: Get the n-th element of the array.

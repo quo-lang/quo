@@ -1777,6 +1777,16 @@ static QuoVar quo__dict_method_keys(QuoState *s, int64_t argc, QuoVar *argv) {
   }
   return quo_var_new_obj(keys);
 }
+static QuoVar quo__dict_method_values(QuoState *s, int64_t argc, QuoVar *argv) {
+  if (argc != 1) return quo_var_new_err("values() requires no arguments");
+  QuoArr *values = quo_arr_new();
+  QuoDict *dict = quo_var_as_dict(&argv[0]);
+  for (int i = 0; i < dict->dict.capacity; ++i) {
+    QuoHashTableEntry *entry = &dict->dict.items[i];
+    if (entry->key) quo_arr_push(values, entry->value);
+  }
+  return quo_var_new_obj(values);
+}
 
 // --- REGISTER AND DISPATCH METHODS --- //
 
@@ -1869,6 +1879,7 @@ QuoState *quo_state_new(const char *cwd) {
   quo__register_builtin_method(s, &s->dict_methods, "set", quo__dict_method_set);
   quo__register_builtin_method(s, &s->dict_methods, "has", quo__dict_method_has);
   quo__register_builtin_method(s, &s->dict_methods, "keys", quo__dict_method_keys);
+  quo__register_builtin_method(s, &s->dict_methods, "values", quo__dict_method_values);
 
   return s;
 }
