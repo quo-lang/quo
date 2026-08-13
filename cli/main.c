@@ -63,7 +63,7 @@ static int quo__run(const char *path) {
 
   // Run code
   QuoParser *p = quo_parser_new(s, path);
-  if (quo_parser_parse(p)) {
+  if (p && quo_parser_parse(p)) {
     QuoCompiler *c = quo_compiler_new(s, "main", -1);
     QuoFn *main = quo_compiler_compile(c, p->ast);
     quo_compiler_free(c);
