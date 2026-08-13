@@ -139,7 +139,7 @@ typedef QuoStmtList QuoAST;
 typedef struct QuoState QuoState;
 
 typedef struct {
-  QuoToken key;
+  QuoExpr *key;
   QuoExpr *value;
 } QuoExprDictPair;
 
@@ -2115,7 +2115,10 @@ static void quo__expr_free(QuoExpr *expr) {
     break;
   case QUO_EXPR_MEMBER_ACCESS: quo__expr_free(expr->member_access.object); break;
   case QUO_EXPR_DICT:
-    for (int i = 0; i < da_count(&expr->dict.pairs); i++) quo__expr_free(da_at(&expr->dict.pairs, i).value);
+    for (int i = 0; i < da_count(&expr->dict.pairs); i++) {
+      quo__expr_free(da_at(&expr->dict.pairs, i).key);
+      quo__expr_free(da_at(&expr->dict.pairs, i).value);
+    }
     da_free(&expr->dict.pairs);
     break;
   case QUO_EXPR_FUNCTION:
@@ -2257,13 +2260,15 @@ static QuoExpr *quo__parser_dict_literal(QuoParser *p) {
         expr->dict.trailing_comma = true;
         break;
       }
-      if (!quo__parser_match(p, QUO_TT_LITERAL_STR)) quo__parser_error(p, p->current, "Dictionary keys must be string literals");
-      QuoToken key = p->previous;
+      QuoExpr *key = quo__parser_expression(p);
       quo__parser_expect(p, QUO_TT_COLON, "Expected ':' after dictionary key");
       QuoExpr *value = quo__parser_expression(p);
       QuoExprDictPair pair = {key, value};
-      // Auto-name function expressions using the dict key
-      if (value->type == QUO_EXPR_FUNCTION && value->function.name.len == 0) value->function.name = key;
+      // Auto-name function expressions using the dict key if it's a string literal
+      if (value->type == QUO_EXPR_FUNCTION && value->function.name.len == 0 && key->type == QUO_EXPR_LITERAL &&
+          key->token.type == QUO_TT_LITERAL_STR) {
+        value->function.name = key->token;
+      }
       da_add(&expr->dict.pairs, pair);
     } while (quo__parser_match(p, QUO_TT_COMMA));
   }
@@ -2736,13 +2741,8 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
     // Compile each key-value pair
     for (int i = 0; i < pair_count; i++) {
       QuoExprDictPair pair = da_at(&e->dict.pairs, i);
-      // Push key
-      QuoVar key_var = quo_var_new_obj(quo_str_new(c->s, pair.key.start, pair.key.len));
-      uint64_t key_idx = quo__function_push_constant(c->fn, &key_var);
-      quo__function_push_instruction(c->fn, QUO_OP_CONSTANT);
-      quo__function_push_instruction(c->fn, key_idx);
-      // Push value
-      quo__compiler_expr(c, pair.value);
+      quo__compiler_expr(c, pair.key);   // Compile key expression (should evaluate to a string)
+      quo__compiler_expr(c, pair.value); // Compile value expression
     }
     // Create dictionary
     quo__function_push_instruction(c->fn, QUO_OP_DICT);
@@ -3243,13 +3243,13 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
     }
     case QUO_OP_DICT: {
       uint64_t pair_count = READ_INST();
-      // Create new dictionary
-      QuoDict *dict = quo_dict_new();
+      QuoDict *dict = quo_dict_new(); // Create new dictionary
       // Pop key-value pairs in reverse order
       for (int64_t i = pair_count - 1; i >= 0; i--) {
         QuoVar value = quo__vm_pop(vm);
         QuoVar key_var = quo__vm_pop(vm);
         if (quo_var_is_str(&key_var)) quo_dict_set(dict, quo_var_as_str(&key_var), &value);
+        else return quo_var_new_err("Dictionary keys must be strings");
       }
       quo__vm_push(vm, quo_var_new_obj(dict));
       break;
@@ -3507,8 +3507,12 @@ void quo_debug_expression_print(QuoExpr *expr, int indent) {
     printf("DICT:\n");
     for (int i = 0; i < expr->dict.pairs.count; i++) {
       QuoExprDictPair pair = da_at(&expr->dict.pairs, i);
-      printf("\"" QUO_TOKEN_FMT "\": ", QUO_TOKEN_ARG(pair.key));
-      quo_debug_expression_print(pair.value, indent + 1);
+      for (int j = 0; j < indent + 1; j++) printf("  ");
+      printf("KEY:\n");
+      quo_debug_expression_print(pair.key, indent + 2);
+      for (int j = 0; j < indent + 1; j++) printf("  ");
+      printf("VALUE:\n");
+      quo_debug_expression_print(pair.value, indent + 2);
     }
     break;
   case QUO_EXPR_VARIABLE: printf("VAR: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(expr->token)); break;
