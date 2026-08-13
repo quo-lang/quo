@@ -350,7 +350,7 @@ All functions are implemented in **C** so they are fast and efficient.
 
 **Example usage:**
 
-```
+```js
 var encoded_string = base64.encode("Hello, World!")
 print(encoded_string) # SGVsbG8sIFdvcmxkIQ==
 ```
@@ -359,7 +359,9 @@ print(encoded_string) # SGVsbG8sIFdvcmxkIQ==
 
 - `base64`: Encodes and decodes strings using base64.
   - `encode(s)`: Returns the base64 encoding of `s`.
+  - `encode_url(s)`: Returns the base64 encoding of `s` in URL-safe format.
   - `decode(s)`: Returns the decoded string of `s`.
+  - `decode_url(s)`: Returns the decoded string of `s` from URL-safe format.
 
 - `csv`: Parses and generates CSV files.
   - `parse(s)`: Returns an array of rows parsed from string `s`.
