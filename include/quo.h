@@ -2347,7 +2347,7 @@ static QuoExpr *quo__parser_assignment_expr(QuoParser *p, QuoExpr *target) {
   QuoExpr *value = quo__parser_expression(p);
 
   // If assigning a function to a variable, auto-name it
-  if (value && value->type == QUO_EXPR_FUNCTION && target->type == QUO_EXPR_VARIABLE) { value->function.name = target->token; }
+  if (value && value->type == QUO_EXPR_FUNCTION) value->function.name = target->token;
 
   QuoExpr *expr = quo__expr_new(QUO_EXPR_ASSIGN, op);
   expr->assign.target = target;
@@ -3462,7 +3462,6 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       *quo__vm_peek(vm, argc) = quo_var_new_obj(method); // Replace with function
       quo_var_ref(quo__vm_peek(vm, argc));
       // Stack: [object, function, arg1, arg2, ...]
-      // We need to rearrange to: [function, object, arg1, arg2, ...]
       // Swap object and function
       QuoVar tmp = *quo__vm_peek(vm, argc);
       *quo__vm_peek(vm, argc) = *quo__vm_peek(vm, argc + 1);
