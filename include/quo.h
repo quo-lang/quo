@@ -94,6 +94,7 @@ typedef struct {
     QUO_TT_AND,      // and
     QUO_TT_OR,       // or
     QUO_TT_RETURN,   // return
+    QUO_TT_IMPORT,   // import
     // Single-character symbols
     QUO_TT_DOT,      // .
     QUO_TT_OPAREN,   // (
@@ -137,6 +138,8 @@ typedef da(QuoExpr *) QuoExprList;
 typedef da(QuoStmt *) QuoStmtList;
 typedef QuoStmtList QuoAST;
 typedef struct QuoState QuoState;
+typedef struct QuoModule QuoModule;
+typedef struct QuoParser QuoParser;
 
 typedef struct {
   QuoExpr *key;
@@ -209,6 +212,7 @@ struct QuoStmt {
     QUO_STMT_BREAK,
     QUO_STMT_CONTINUE,
     QUO_STMT_BLOCK,
+    QUO_STMT_IMPORT,
   } type;
   union {
     struct {
@@ -225,7 +229,8 @@ struct QuoStmt {
       QuoExpr *condition;
       QuoStmt *increment;
       QuoStmt *body;
-    } loop;              // Loop
+    } loop; // Loop
+    QuoModule *import;
     QuoStmtList block;   // Block statement (multiple statements)
     QuoExpr *expression; // QuoExpr statement or return statement expression
   };
@@ -272,6 +277,7 @@ typedef enum {
   QUO_OBJ_TYPE_STR,
   QUO_OBJ_TYPE_ARR,
   QUO_OBJ_TYPE_DICT,
+  QUO_OBJ_TYPE_MODULE,
   QUO_OBJ_TYPE_FN,
   QUO_OBJ_TYPE_CFN,
   QUO_OBJ_TYPE_USER,
@@ -343,6 +349,7 @@ typedef struct {
   int arity; // -1 for variadic
   da(uint64_t) instructions;
   da(QuoVar) constants;
+  QuoState *state;
 } QuoFn;
 
 QuoFn *quo_function_new(QuoState *s, const char *name, uint64_t name_len);
@@ -359,6 +366,22 @@ typedef struct {
 QuoCFn *quo_cfunction_new(QuoState *s, const char *name, int64_t name_len, QuoCFunctionPtr ptr);
 
 static inline QuoCFn *quo_obj_as_cfn(const QuoObj *o) { return (QuoCFn *)o; }
+
+typedef struct QuoModule {
+  QuoObj obj;
+  QuoStr *name;
+  QuoState *state;  // Module's own isolated state
+  bool initialized; // Whether the module has been run
+} QuoModule;
+
+// Add helper functions
+QuoModule *quo_module_new(QuoState *s, const char *name, int64_t name_len);
+void quo_module_add_export(QuoModule *module, QuoStr *name, QuoVar value);
+
+static inline bool quo_obj_is_module(const QuoObj *o) { return o->type == QUO_OBJ_TYPE_MODULE; }
+static inline QuoModule *quo_obj_as_module(const QuoObj *o) { return (QuoModule *)o; }
+static inline bool quo_var_is_module(const QuoVar *v) { return quo_var_is_obj(v) && v->val_obj->type == QUO_OBJ_TYPE_MODULE; }
+static inline QuoModule *quo_var_as_module(const QuoVar *v) { return quo_obj_as_module(v->val_obj); }
 
 typedef void (*QuoModuleCleanupFn)(QuoState *);
 typedef bool (*QuoModuleInitFn)(QuoState *);
@@ -383,7 +406,7 @@ typedef struct QuoState {
   char *cwd; // Base directory for resolving imports
 } QuoState;
 
-typedef struct QuoParser {
+struct QuoParser {
   QuoState *s;
   // Lexer
   int pos, line, column;
@@ -399,7 +422,7 @@ typedef struct QuoParser {
   uint64_t loop_count;
   // Output
   QuoAST ast;
-} QuoParser;
+};
 
 typedef struct {
   QuoToken name;
@@ -759,6 +782,22 @@ bool quo_write_file(const char *path, const char *content) {
   return true;
 }
 
+static char *quo_file_name(const char *path) {
+  if (!path) return NULL;
+  // Remove the directory path from the file name
+  const char *last_slash = NULL;
+  for (const char *p = path; *p; p++)
+    if (*p == '/' || *p == '\\') last_slash = p;
+  // If no slash found, use the entire path as filename
+  const char *filename = last_slash ? last_slash + 1 : path;
+  // Remove extension - only look for dots in the filename part
+  const char *last_dot = NULL;
+  for (const char *p = filename; *p; p++)
+    if (*p == '.') last_dot = p;
+  if (!last_dot) return quo_strdup(filename);
+  return quo_strndup(filename, last_dot - filename);
+}
+
 // Extracts the directory path from a file path
 // e.g., "path/to/script.quo" -> "path/to/"
 static char *quo_dirname(const char *path) {
@@ -803,7 +842,7 @@ static QuoHashTableEntry *quo__ht_find_entry(QuoHashTableEntry *entries, uint64_
       } else {
         if (tombstone == NULL) tombstone = entry; // We found a tombstone
       }
-    } else if (entry->key == key) {
+    } else if (entry->key == key || entry->key->hash == key->hash || strcmp(entry->key->data, key->data) == 0) {
       return entry; // We found the key
     }
     index = (index + 1) & (capacity - 1);
@@ -880,7 +919,7 @@ void quo_ht_free(QuoHashTable *t) {
 
 static enum QuoTokenType quo__keywords[] = {
     QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_LOOP, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
-    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,  QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN,
+    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,  QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN, QUO_TT_IMPORT,
 };
 static enum QuoTokenType quo__single_char_symbols[] = {
     QUO_TT_DOT,   QUO_TT_OPAREN, QUO_TT_CPAREN, QUO_TT_OBRACE, QUO_TT_CBRACE,   QUO_TT_OBRACKET, QUO_TT_CBRACKET,
@@ -891,7 +930,7 @@ static enum QuoTokenType quo__compound_symbols[] = {
     QUO_TT_BANGEQ, QUO_TT_DOUBLEEQ, QUO_TT_GTEQ, QUO_TT_LTEQ, QUO_TT_PLUSEQ, QUO_TT_MINUSEQ, QUO_TT_MULEQ, QUO_TT_DIVEQ,
 };
 
-static_assert(quo__static_array_size(quo__keywords) == 13, "quo__keywords size mismatch");
+static_assert(quo__static_array_size(quo__keywords) == 14, "quo__keywords size mismatch");
 static_assert(quo__static_array_size(quo__single_char_symbols) == 19, "quo__single_char_symbols size mismatch");
 static_assert(quo__static_array_size(quo__compound_symbols) == 8, "quo__compound_symbols size mismatch");
 
@@ -1032,6 +1071,7 @@ const char *quo_token_type_str(enum QuoTokenType t) {
   case QUO_TT_AND: str = "and"; break;
   case QUO_TT_OR: str = "or"; break;
   case QUO_TT_RETURN: str = "return"; break;
+  case QUO_TT_IMPORT: str = "import"; break;
   case QUO_TT_DOT: str = "."; break;
   case QUO_TT_OPAREN: str = "("; break;
   case QUO_TT_CPAREN: str = ")"; break;
@@ -1109,6 +1149,11 @@ void quo_obj_unref(QuoObj *obj) {
     for (int i = 0; i < da_count(&fn->constants); i++) quo_var_unref(&da_at(&fn->constants, i));
     da_free(&fn->instructions);
     da_free(&fn->constants);
+    break;
+  }
+  case QUO_OBJ_TYPE_MODULE: {
+    QuoModule *module = quo_obj_as_module(obj);
+    if (module->state) quo_state_free(module->state);
     break;
   }
   case QUO_OBJ_TYPE_CFN: break;
@@ -1219,6 +1264,7 @@ QuoFn *quo_function_new(QuoState *s, const char *name, uint64_t name_len) {
   fn->obj.type = QUO_OBJ_TYPE_FN;
   fn->name = quo_str_new(s, name, name_len);
   fn->arity = -1;
+  fn->state = s;
   return fn;
 }
 static inline void quo__function_push_instruction(QuoFn *f, uint64_t instruction) { da_add(&f->instructions, instruction); }
@@ -1300,6 +1346,15 @@ QuoCFn *quo_cfunction_new(QuoState *s, const char *name, int64_t name_len, QuoCF
   fn->name = quo_str_new(s, name, name_len);
   fn->fn = ptr;
   return fn;
+}
+
+QuoModule *quo_module_new(QuoState *s, const char *name, int64_t name_len) {
+  QuoModule *module = (QuoModule *)quo_obj_new(sizeof(QuoModule));
+  module->obj.type = QUO_OBJ_TYPE_MODULE;
+  module->name = quo_str_new(s, name, name_len);
+  module->state = quo_state_new(s->cwd);
+  module->initialized = false;
+  return module;
 }
 
 // --- CONVERSION FUNCTIONS --- //
@@ -1519,7 +1574,8 @@ int64_t quo_var_print(QuoVar *v) {
       len += printf("}");
       return len;
     }
-    case QUO_OBJ_TYPE_FN: return printf("<fn %s>", quo_obj_as_fn(v->val_obj)->name->data);
+    case QUO_OBJ_TYPE_MODULE: return printf("<module %s>", quo_obj_as_module(v->val_obj)->name->data);
+    case QUO_OBJ_TYPE_FN: return printf("<fn %s(%d)>", quo_obj_as_fn(v->val_obj)->name->data, quo_obj_as_fn(v->val_obj)->arity);
     case QUO_OBJ_TYPE_CFN: return printf("<cfn %s>", quo_obj_as_cfn(v->val_obj)->name->data);
     case QUO_OBJ_TYPE_USER: return printf("<%s>", v->val_obj->name->data);
     }
@@ -1528,34 +1584,6 @@ int64_t quo_var_print(QuoVar *v) {
 }
 
 // --- STANDARD LIBRARY --- //
-
-static QuoVar quo__cfn_import(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("import() requires a string path");
-
-  const char *module_path = quo_obj_as_str(argv[0].val_obj)->data;
-  // Resolve relative to base_dir
-  char *full_path = quo_strdupf("%s%s.quo", s->cwd, module_path);
-  // Create parser for the module
-  QuoParser *mod_parser = quo_parser_new(s, full_path);
-  quo_dealloc(full_path);
-  if (!mod_parser) return quo_var_new_err("Module not found");
-  if (!quo_parser_parse(mod_parser)) {
-    quo_parser_free(mod_parser);
-    return quo_var_new_err("Failed to parse module");
-  }
-  // Compile the module
-  QuoCompiler *mod_compiler = quo_compiler_new(s, module_path, -1);
-  QuoFn *mod_fn = quo_compiler_compile(mod_compiler, mod_parser->ast);
-  // Run the module in a new VM (shares state s)
-  QuoVM *mod_vm = quo_vm_new(s);
-  QuoVar result = quo_vm_run(mod_vm, mod_fn);
-  quo_var_ref(&result); // Keep alive after cleanup
-  // Cleanup
-  quo_vm_free(mod_vm);
-  quo_compiler_free(mod_compiler);
-  quo_parser_free(mod_parser);
-  return result;
-}
 
 static QuoVar quo__cfn_type(QuoState *s, int64_t argc, QuoVar *argv) {
   if (argc != 1) return quo_var_new_err("type() takes 1 argument");
@@ -1570,6 +1598,7 @@ static QuoVar quo__cfn_type(QuoState *s, int64_t argc, QuoVar *argv) {
     case QUO_OBJ_TYPE_STR: type_str = "str"; break;
     case QUO_OBJ_TYPE_ARR: type_str = "arr"; break;
     case QUO_OBJ_TYPE_DICT: type_str = "dict"; break;
+    case QUO_OBJ_TYPE_MODULE: type_str = "module"; break;
     case QUO_OBJ_TYPE_FN: type_str = "fn"; break;
     case QUO_OBJ_TYPE_CFN: type_str = "cfn"; break;
     case QUO_OBJ_TYPE_USER: type_str = argv[0].val_obj->name ? argv[0].val_obj->name->data : "USER"; break;
@@ -1840,7 +1869,6 @@ QuoState *quo_state_new(const char *cwd) {
   // Register stdlib
 
   // Register global functions
-  quo_state_register_cfn(s, "import", -1, quo__cfn_import);
   quo_state_register_cfn(s, "type", -1, quo__cfn_type);
   quo_state_register_cfn(s, "print", -1, quo__cfn_print);
   quo_state_register_cfn(s, "input", -1, quo__cfn_input);
@@ -2427,6 +2455,7 @@ static void quo__stmt_free(QuoStmt *stmt) {
   if (!stmt) return;
   switch (stmt->type) {
   case QUO_STMT_EXPRESSION: quo__expr_free(stmt->expression); break;
+  case QUO_STMT_IMPORT: break;
   case QUO_STMT_RETURN:
     if (stmt->expression) quo__expr_free(stmt->expression);
     break;
@@ -2458,6 +2487,56 @@ static QuoStmt *quo__parser_expression_statement(QuoParser *p) {
   QuoExpr *expr = quo__parser_expression(p);
   QuoStmt *stmt = quo__stmt_new(QUO_STMT_EXPRESSION);
   stmt->expression = expr;
+  return stmt;
+}
+
+static QuoStmt *quo__parser_import_stmt(QuoParser *p) {
+  // Check if we're at global scope (only 1 scope exists)
+  if (da_count(&p->scopes) > 1) quo__parser_error(p, p->previous, "Import statements can only be used at global scope");
+  quo__parser_expect(p, QUO_TT_LITERAL_STR, "Expected import path string");
+  QuoToken path = p->previous;
+  // Resolve the module path
+  char *mod_path = quo_strdupf("%s/%.*s.quo", p->s->cwd, path.len, path.start);
+  char *mod_name = quo_file_name(mod_path);
+  // Create and compile the module
+  QuoModule *module = quo_module_new(p->s, mod_name, -1);
+  quo_dealloc(mod_name);
+  // Parse the module
+  QuoParser *mod_parser = quo_parser_new(module->state, mod_path);
+  quo_dealloc(mod_path);
+  if (!mod_parser) {
+    quo__parser_error(p, p->current, "Module not found: %.*s", path.len, path.start);
+    return NULL;
+  }
+  if (!quo_parser_parse(mod_parser)) {
+    quo_parser_free(mod_parser);
+    return NULL;
+  }
+  // Compile the module's AST into a function and run it
+  QuoCompiler *mod_compiler = quo_compiler_new(module->state, mod_parser->file_name, -1);
+  QuoFn *main_fn = quo_compiler_compile(mod_compiler, mod_parser->ast);
+  quo_compiler_free(mod_compiler);
+  quo_parser_free(mod_parser);
+  QuoVM *vm = quo_vm_new(module->state);
+  if (!vm) return NULL;
+  QuoVar result = quo_vm_run(vm, main_fn);
+  // TODO ref globals
+  // quo_vm_free(vm);
+
+  // Declare the module name in the current scope
+  QuoToken module_name = {
+      .start = module->name->data,
+      .len = module->name->len,
+      .type = QUO_TT_ID,
+      .line = path.line,
+      .column = path.column,
+  };
+  if (quo__parser_is_declared_in_current_scope(p, module_name)) {
+    quo__parser_error(p, module_name, "Variable '" QUO_TOKEN_FMT "' already declared in this scope", QUO_TOKEN_ARG(module_name));
+  }
+  quo__parser_declare_variable(p, module_name);
+  QuoStmt *stmt = quo__stmt_new(QUO_STMT_IMPORT);
+  stmt->import = module;
   return stmt;
 }
 
@@ -2616,6 +2695,7 @@ static void quo__parser_statement(QuoParser *p) {
   else if (quo__parser_match(p, QUO_TT_LOOP)) stmt = quo__parser_loop_statement(p);
   else if (quo__parser_match(p, QUO_TT_BREAK)) stmt = quo__parser_break_statement(p);
   else if (quo__parser_match(p, QUO_TT_CONTINUE)) stmt = quo__parser_continue_statement(p);
+  else if (quo__parser_match(p, QUO_TT_IMPORT)) stmt = quo__parser_import_stmt(p);
   else stmt = quo__parser_expression_statement(p);
   if (stmt) da_add(&p->ast, stmt);
 }
@@ -2624,6 +2704,7 @@ QuoParser *quo_parser_new(QuoState *s, const char *path) {
   QuoParser *p = quo_alloc(NULL, sizeof(QuoParser));
   p->s = s;
   p->file_path = quo_strdup(path);
+  p->file_name = quo_file_name(path);
   char *source = quo_read_file(path);
   if (!source) {
     quo_dealloc(p->file_path);
@@ -2945,10 +3026,27 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
 
 static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
   switch (s->type) {
+
   case QUO_STMT_EXPRESSION: {
     quo__compiler_expr(c, s->expression);
     // Only pop if the expression leaves a value (not an assignment)
     if (s->expression->type != QUO_EXPR_ASSIGN) quo__function_push_instruction(c->fn, QUO_OP_POP);
+    break;
+  }
+  case QUO_STMT_IMPORT: {
+    QuoModule *module = s->import;
+    // Store the module as a global variable
+    QuoVar module_var = quo_var_new_obj((QuoObj *)module);
+    // Set as global
+    // da_add(&c->declared_globals, s->import->name);
+    uint64_t ns_idx = quo__function_push_constant(c->fn, &module_var);
+    quo__function_push_instruction(c->fn, QUO_OP_CONSTANT);
+    quo__function_push_instruction(c->fn, ns_idx);
+    QuoStr *mod_name = quo_str_new(c->s, module->name->data, module->name->len);
+    QuoVar name_var = quo_var_new_obj(mod_name);
+    uint64_t name_idx = quo__function_push_constant(c->fn, &name_var);
+    quo__function_push_instruction(c->fn, QUO_OP_SET_GLOBAL);
+    quo__function_push_instruction(c->fn, name_idx);
     break;
   }
   case QUO_STMT_VAR_DECL: {
@@ -3355,25 +3453,39 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
     case QUO_OP_GET_GLOBAL: {
       QuoVar name_var = READ_CONST();
       QuoVar value;
-      if (quo_ht_get(&vm->s->globals, quo_var_as_str(&name_var), &value)) quo__vm_push(vm, value);
+      if (quo_ht_get(&frame->function->state->globals, quo_var_as_str(&name_var), &value)) quo__vm_push(vm, value);
       else return quo_var_new_err("Undefined variable");
       break;
     }
     case QUO_OP_SET_GLOBAL: {
       QuoVar name_var = READ_CONST();
       QuoVar old_value;
-      if (quo_ht_get(&vm->s->globals, quo_var_as_str(&name_var), &old_value)) quo_var_unref(&old_value);
+      if (quo_ht_get(&frame->function->state->globals, quo_var_as_str(&name_var), &old_value)) quo_var_unref(&old_value);
       QuoVar *value = quo__vm_peek(vm, 0);
       quo_var_ref(value);
-      quo_ht_set(&vm->s->globals, quo_var_as_str(&name_var), value);
+      quo_ht_set(&frame->function->state->globals, quo_var_as_str(&name_var), value);
       da_pop(&vm->stack);
       break;
     }
     case QUO_OP_MEMBER_ACCESS: {
       // Stack: [object] [field_name]
       QuoVar field_name = quo__vm_pop(vm);
-      QuoVar object = *quo__vm_peek(vm, 0); // Peek, don't pop yet
-      if (quo_var_is_dict(&object)) {
+      // Stack: [object]
+      QuoVar object = *quo__vm_peek(vm, 0);
+      if (quo_var_is_module(&object)) {
+        // Look up in module exports
+        QuoModule *module = quo_var_as_module(&object);
+        QuoStr *field_str = quo_var_as_str(&field_name);
+        QuoVar value;
+        if (quo_ht_get(&module->state->globals, field_str, &value)) {
+          quo_var_unref(quo__vm_peek(vm, 0));
+          *quo__vm_peek(vm, 0) = value;
+          quo_var_ref(quo__vm_peek(vm, 0));
+        } else {
+          quo_var_unref(quo__vm_peek(vm, 0));
+          *quo__vm_peek(vm, 0) = quo_var_new_nil();
+        }
+      } else if (quo_var_is_dict(&object)) {
         // Look up field in dict
         QuoVar value;
         if (quo_ht_get(&quo_obj_as_dict(object.val_obj)->dict, quo_var_as_str(&field_name), &value)) {
@@ -3386,6 +3498,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
           *quo__vm_peek(vm, 0) = quo_var_new_nil();
         }
       } else {
+        // TODO fix check first
         // Look up method in array method table
         QuoObj *method = quo__method_lookup(vm->s, &object, quo_var_as_str(&field_name));
         if (method) {
@@ -3403,6 +3516,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       QuoVar value = quo__vm_pop(vm);
       QuoVar field_name = quo__vm_pop(vm);
       QuoVar dict = *quo__vm_peek(vm, 0);
+      if (!quo_var_is_dict(&dict)) return quo_var_new_err("Setting field on non-dictionary");
       quo_dict_set(quo_obj_as_dict(dict.val_obj), quo_var_as_str(&field_name), &value);
       quo_var_unref(&field_name);
       break;
@@ -3441,37 +3555,74 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       QuoVar method_name = *quo__vm_peek(vm, argc);
       QuoVar *object = quo__vm_peek(vm, argc + 1);
       QuoObj *method = NULL;
+      bool is_method = false; // Whether method takes 'self' as first arg
+
       // First lookup for type methods
       method = quo__method_lookup(vm->s, object, quo_var_as_str(&method_name));
+      if (method) {
+        is_method = true; // Type methods take 'self'
+      }
+
+      // Look up in module globals (these are regular functions)
+      if (!method && quo_var_is_module(object)) {
+        QuoModule *mod = quo_var_as_module(object);
+        QuoVar method_var;
+        bool found = quo_ht_get(&mod->state->globals, quo_var_as_str(&method_name), &method_var);
+        if (found && method_var.type == QUO_VAR_TYPE_OBJ && method_var.val_obj) {
+          method = method_var.val_obj;
+          is_method = false; // Module functions don't take 'self'
+        }
+      }
+
       // Look up in object's own dict (for namespaced functions like io.println)
       if (!method && quo_var_is_dict(object)) {
         QuoDict *dict = quo_obj_as_dict(object->val_obj);
         QuoVar method_var;
         bool found = quo_ht_get(&dict->dict, quo_var_as_str(&method_name), &method_var);
-        if (found && method_var.type == QUO_VAR_TYPE_OBJ && method_var.val_obj) method = method_var.val_obj;
+        if (found && method_var.type == QUO_VAR_TYPE_OBJ && method_var.val_obj) {
+          method = method_var.val_obj;
+          is_method = true; // Dict functions take 'self'
+        }
       }
+
       if (!method) {
         for (uint64_t i = 0; i < argc + 2; i++) quo_var_unref(quo__vm_peek(vm, i));
         da_count(&vm->stack) -= argc + 2;
         return quo_var_new_err("Method not found");
       }
+
       // Save the method type before manipulating the stack
       QuoObjType method_type = method->type;
+
       // Replace method_name with function object
       quo_var_unref(quo__vm_peek(vm, argc));             // Unref method_name string
       *quo__vm_peek(vm, argc) = quo_var_new_obj(method); // Replace with function
       quo_var_ref(quo__vm_peek(vm, argc));
-      // Stack: [object, function, arg1, arg2, ...]
-      // Swap object and function
-      QuoVar tmp = *quo__vm_peek(vm, argc);
-      *quo__vm_peek(vm, argc) = *quo__vm_peek(vm, argc + 1);
-      *quo__vm_peek(vm, argc + 1) = tmp;
-      // Stack: [function, object, arg1, arg2, ...]
-      // Call with argc+1 to include 'self' as first argument
-      QuoVar result = quo__vm_dispatch_call(vm, method, argc + 1);
-      if (result.type == QUO_VAR_TYPE_ERROR) return result;
-      // Use the saved type
-      if (method_type == QUO_OBJ_TYPE_FN) frame = LAST_FRAME();
+
+      if (is_method) {
+        // Stack: [object, function, arg1, arg2, ...]
+        // Swap object and function to get: [function, object, arg1, arg2, ...]
+        QuoVar tmp = *quo__vm_peek(vm, argc);
+        *quo__vm_peek(vm, argc) = *quo__vm_peek(vm, argc + 1);
+        *quo__vm_peek(vm, argc + 1) = tmp;
+        // Call with argc+1 to include 'self' as first argument
+        QuoVar result = quo__vm_dispatch_call(vm, method, argc + 1);
+        if (result.type == QUO_VAR_TYPE_ERROR) return result;
+        if (method_type == QUO_OBJ_TYPE_FN) frame = LAST_FRAME();
+      } else {
+        // For module/dict functions, just remove the object and call normally
+        // Stack: [object, function, arg1, arg2, ...]
+        // Remove object (shift everything down)
+        QuoVar object_var = *quo__vm_peek(vm, argc + 1);
+        quo_var_unref(&object_var);
+        // Move function and args down one slot
+        for (uint64_t i = argc + 1; i > 0; i--) { *quo__vm_peek(vm, i) = *quo__vm_peek(vm, i - 1); }
+        da_count(&vm->stack)--; // Remove one slot
+        // Stack: [function, arg1, arg2, ...]
+        QuoVar result = quo__vm_dispatch_call(vm, method, argc);
+        if (result.type == QUO_VAR_TYPE_ERROR) return result;
+        if (method_type == QUO_OBJ_TYPE_FN) frame = LAST_FRAME();
+      }
       break;
     }
     }
@@ -3586,6 +3737,7 @@ void quo_debug_statement_print(QuoStmt *stmt, int indent) {
   if (!stmt) return;
   for (int i = 0; i < indent; i++) printf("  ");
   switch (stmt->type) {
+  case QUO_STMT_IMPORT: printf("IMPORT: %s\n", stmt->import->state->cwd); break;
   case QUO_STMT_VAR_DECL:
     printf("VAR_DECL: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(stmt->var_decl.name));
     if (stmt->var_decl.initializer) quo_debug_expression_print(stmt->var_decl.initializer, indent + 1);
