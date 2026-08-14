@@ -1370,6 +1370,7 @@ QuoVar quo_var_to_bool(QuoVar *v) {
     case QUO_OBJ_TYPE_STR: return quo_var_new_bool(quo_obj_as_str(v->val_obj)->len > 0);
     case QUO_OBJ_TYPE_ARR: return quo_var_new_bool(quo_obj_as_arr(v->val_obj)->arr.count > 0);
     case QUO_OBJ_TYPE_DICT: return quo_var_new_bool(quo_obj_as_dict(v->val_obj)->dict.count > 0);
+    case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_FN:
     case QUO_OBJ_TYPE_CFN: return quo_var_new_bool(false);
@@ -1388,6 +1389,7 @@ QuoVar quo_var_to_num(QuoVar *v) {
     case QUO_OBJ_TYPE_STR: return quo_var_new_num(quo_strtod(quo_obj_as_str(v->val_obj)->data, quo_obj_as_str(v->val_obj)->len));
     case QUO_OBJ_TYPE_ARR:
     case QUO_OBJ_TYPE_DICT:
+    case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_FN:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_CFN: return quo_var_new_num(0.0);
@@ -1409,6 +1411,7 @@ QuoVar quo_var_to_str(QuoState *s, QuoVar *v) {
     switch (v->val_obj->type) {
     case QUO_OBJ_TYPE_STR: return *v;
     case QUO_OBJ_TYPE_ARR:
+    case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_DICT:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_FN:
@@ -1508,6 +1511,7 @@ bool quo_var_eq(QuoState *s, QuoVar *a, QuoVar *b) {
     switch (a->val_obj->type) {
     case QUO_OBJ_TYPE_CFN: return quo_obj_as_cfn(a->val_obj)->name == quo_obj_as_cfn(b->val_obj)->name;
     case QUO_OBJ_TYPE_FN: return quo_obj_as_cfn(a->val_obj)->name == quo_obj_as_cfn(b->val_obj)->name;
+    case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_STR:
     case QUO_OBJ_TYPE_ARR:
     case QUO_OBJ_TYPE_USER:
@@ -1838,6 +1842,7 @@ static QuoObj *quo__method_lookup(QuoState *s, QuoVar *val, QuoStr *name) {
     case QUO_OBJ_TYPE_ARR: methods = &s->arr_methods; break;
     case QUO_OBJ_TYPE_DICT: methods = &s->dict_methods; break;
     case QUO_OBJ_TYPE_USER: methods = &val->val_obj->dict->dict; break;
+    case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_FN:
     case QUO_OBJ_TYPE_CFN: break;
     }
@@ -1856,7 +1861,7 @@ QuoState *quo_state_new(const char *cwd) {
 
   QuoState *s = quo_alloc(NULL, sizeof(QuoState));
 
-  s->cwd = cwd ? quo_strdup(cwd) : NULL;
+  s->cwd = cwd ? quo_strdup(cwd) : quo_strdup("./");
 
   quo_ht_init(&s->string_table);
   quo_ht_init(&s->bool_methods);
@@ -2491,7 +2496,6 @@ static QuoStmt *quo__parser_expression_statement(QuoParser *p) {
 }
 
 static QuoStmt *quo__parser_import_stmt(QuoParser *p) {
-  // Check if we're at global scope (only 1 scope exists)
   if (da_count(&p->scopes) > 1) quo__parser_error(p, p->previous, "Import statements can only be used at global scope");
   quo__parser_expect(p, QUO_TT_LITERAL_STR, "Expected import path string");
   QuoToken path = p->previous;
@@ -2506,10 +2510,13 @@ static QuoStmt *quo__parser_import_stmt(QuoParser *p) {
   quo_dealloc(mod_path);
   if (!mod_parser) {
     quo__parser_error(p, p->current, "Module not found: %.*s", path.len, path.start);
+    quo_parser_free(mod_parser);
+    quo_obj_unref((QuoObj *)module);
     return NULL;
   }
   if (!quo_parser_parse(mod_parser)) {
     quo_parser_free(mod_parser);
+    quo_obj_unref((QuoObj *)module);
     return NULL;
   }
   // Compile the module's AST into a function and run it
@@ -3472,7 +3479,15 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       QuoVar field_name = quo__vm_pop(vm);
       // Stack: [object]
       QuoVar object = *quo__vm_peek(vm, 0);
-      if (quo_var_is_module(&object)) {
+      // Look up method in array method table
+      QuoObj *method = quo__method_lookup(vm->s, &object, quo_var_as_str(&field_name));
+      if (method) {
+        // Return the method (as a function value)
+        quo_var_unref(quo__vm_peek(vm, 0));
+        *quo__vm_peek(vm, 0) = quo_var_new_obj(method);
+        quo_var_ref(quo__vm_peek(vm, 0));
+      }
+      if (!method && quo_var_is_module(&object)) {
         // Look up in module exports
         QuoModule *module = quo_var_as_module(&object);
         QuoStr *field_str = quo_var_as_str(&field_name);
@@ -3485,7 +3500,8 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
           quo_var_unref(quo__vm_peek(vm, 0));
           *quo__vm_peek(vm, 0) = quo_var_new_nil();
         }
-      } else if (quo_var_is_dict(&object)) {
+      }
+      if (!method && quo_var_is_dict(&object)) {
         // Look up field in dict
         QuoVar value;
         if (quo_ht_get(&quo_obj_as_dict(object.val_obj)->dict, quo_var_as_str(&field_name), &value)) {
@@ -3496,16 +3512,6 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
         } else {
           quo_var_unref(quo__vm_peek(vm, 0));
           *quo__vm_peek(vm, 0) = quo_var_new_nil();
-        }
-      } else {
-        // TODO fix check first
-        // Look up method in array method table
-        QuoObj *method = quo__method_lookup(vm->s, &object, quo_var_as_str(&field_name));
-        if (method) {
-          // Return the method (as a function value)
-          quo_var_unref(quo__vm_peek(vm, 0));
-          *quo__vm_peek(vm, 0) = quo_var_new_obj(method);
-          quo_var_ref(quo__vm_peek(vm, 0));
         }
       }
       quo_var_unref(&field_name);
