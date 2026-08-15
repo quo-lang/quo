@@ -139,6 +139,8 @@ cat.speak("meow") # Cat says "meow"
 | `nil`      | Nil literal               |
 | `true`     | Boolean literal           |
 | `false`    | Boolean literal           |
+| `import`   | Import statement          |
+| `as`       | Import alias              |
 
 ### Basic Types
 
