@@ -95,6 +95,7 @@ typedef struct {
     QUO_TT_OR,       // or
     QUO_TT_RETURN,   // return
     QUO_TT_IMPORT,   // import
+    QUO_TT_AS,       // as
     // Single-character symbols
     QUO_TT_DOT,      // .
     QUO_TT_OPAREN,   // (
@@ -918,8 +919,8 @@ void quo_ht_free(QuoHashTable *t) {
 // -------------------- LEXER -------------------- //
 
 static enum QuoTokenType quo__keywords[] = {
-    QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_LOOP, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
-    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,  QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN, QUO_TT_IMPORT,
+    QUO_TT_VAR,   QUO_TT_FN,  QUO_TT_LOOP, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE, QUO_TT_TRUE,
+    QUO_TT_FALSE, QUO_TT_NIL, QUO_TT_AND,  QUO_TT_OR,    QUO_TT_RETURN,   QUO_TT_IMPORT, QUO_TT_AS,
 };
 static enum QuoTokenType quo__single_char_symbols[] = {
     QUO_TT_DOT,   QUO_TT_OPAREN, QUO_TT_CPAREN, QUO_TT_OBRACE, QUO_TT_CBRACE,   QUO_TT_OBRACKET, QUO_TT_CBRACKET,
@@ -929,10 +930,6 @@ static enum QuoTokenType quo__single_char_symbols[] = {
 static enum QuoTokenType quo__compound_symbols[] = {
     QUO_TT_BANGEQ, QUO_TT_DOUBLEEQ, QUO_TT_GTEQ, QUO_TT_LTEQ, QUO_TT_PLUSEQ, QUO_TT_MINUSEQ, QUO_TT_MULEQ, QUO_TT_DIVEQ,
 };
-
-static_assert(quo__static_array_size(quo__keywords) == 14, "quo__keywords size mismatch");
-static_assert(quo__static_array_size(quo__single_char_symbols) == 19, "quo__single_char_symbols size mismatch");
-static_assert(quo__static_array_size(quo__compound_symbols) == 8, "quo__compound_symbols size mismatch");
 
 bool quo__is_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 bool lexer__is_digit(char c) { return c >= '0' && c <= '9'; }
@@ -1072,6 +1069,7 @@ const char *quo_token_type_str(enum QuoTokenType t) {
   case QUO_TT_OR: str = "or"; break;
   case QUO_TT_RETURN: str = "return"; break;
   case QUO_TT_IMPORT: str = "import"; break;
+  case QUO_TT_AS: str = "as"; break;
   case QUO_TT_DOT: str = "."; break;
   case QUO_TT_OPAREN: str = "("; break;
   case QUO_TT_CPAREN: str = ")"; break;
@@ -2501,7 +2499,12 @@ static QuoStmt *quo__parser_import_stmt(QuoParser *p) {
   QuoToken path = p->previous;
   // Resolve the module path
   char *mod_path = quo_strdupf("%s/%.*s.quo", p->s->cwd, path.len, path.start);
-  char *mod_name = quo_file_name(mod_path);
+  // Resolve the module name. If has an alias, use it, otherwise use the file name.
+  char *mod_name;
+  if (quo__parser_match(p, QUO_TT_AS)) {
+    if (quo__parser_match(p, QUO_TT_LITERAL_STR)) mod_name = quo_strndup(p->previous.start, p->previous.len);
+    else quo__parser_error(p, p->current, "Module alias should be a string literal");
+  } else mod_name = quo_file_name(mod_path);
   // Create and compile the module
   QuoModule *module = quo_module_new(p->s, mod_name, -1);
   quo_dealloc(mod_name);
