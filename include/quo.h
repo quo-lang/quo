@@ -1112,6 +1112,7 @@ void quo_obj_ref(QuoObj *obj) {
 
 void quo_obj_unref(QuoObj *obj) {
   if (!obj) return;
+  if (quo_obj_is_str(obj)) return;
   obj->ref_count--;
   if (obj->ref_count > 0) return;
   switch (obj->type) {
@@ -1138,23 +1139,17 @@ void quo_obj_unref(QuoObj *obj) {
   case QUO_OBJ_TYPE_MODULE: {
     QuoModule *m = quo_obj_as_module(obj);
     if (m->cleanup_fn) m->cleanup_fn(m);
-    quo_dealloc(m->cwd);
-    quo_dealloc(m->source);
-    quo_dealloc(m->file_path);
-    // Free tables
+
+    // Free main function first
+    if (m->fn) quo_obj_unref((QuoObj *)m->fn);
+
+    // Free globals and method tables
     quo_ht_free(&m->globals);
     quo_ht_free(&m->str_methods);
     quo_ht_free(&m->arr_methods);
     quo_ht_free(&m->dict_methods);
-    // Free string table (strings are interned, not ref-counted)
-    for (int i = 0; i < m->string_table.capacity; i++) {
-      if (m->string_table.items[i].key) {
-        quo_dealloc(m->string_table.items[i].key->data);
-        quo_dealloc(m->string_table.items[i].key);
-      }
-    }
-    quo_ht_free(&m->string_table);
-    // Free parser
+
+    // Free parser structures
     for (int i = 0; i < da_count(&m->ast); i++) quo__stmt_free(da_at(&m->ast, i));
     da_free(&m->ast);
     while (da_count(&m->scopes) > 0) {
@@ -1162,12 +1157,24 @@ void quo_obj_unref(QuoObj *obj) {
       da_count(&m->scopes)--;
     }
     da_free(&m->scopes);
-    // Free main function
-    quo_obj_unref((QuoObj *)m->fn);
+
+    // Free other allocated memory
+    quo_dealloc(m->cwd);
+    quo_dealloc(m->source);
+    quo_dealloc(m->file_path);
+
+    // Free string table LAST - after all objects that might reference strings are gone
+    for (int i = 0; i < m->string_table.capacity; i++) {
+      if (m->string_table.items[i].key) {
+        quo_dealloc(m->string_table.items[i].key->data);
+        quo_dealloc(m->string_table.items[i].key);
+      }
+    }
+    quo_ht_free(&m->string_table);
     break;
   }
-  case QUO_OBJ_TYPE_CFN: break;
-  case QUO_OBJ_TYPE_STR: break;
+  case QUO_OBJ_TYPE_STR:
+  case QUO_OBJ_TYPE_CFN:
   case QUO_OBJ_TYPE_USER: break;
   }
   quo_dealloc(obj);
@@ -2326,8 +2333,7 @@ static QuoExpr *quo__parser_unary(QuoModule *m) {
 // Parse a binary expression: expr op expr
 static QuoExpr *quo__parser_binary(QuoModule *m, QuoExpr *left) {
   QuoToken op = m->previous;
-  enum QuoPrecedence precedence = quo__get_parse_rule(op).precedence;
-  QuoExpr *right = quo__parser_parse_precedence(m, precedence);
+  QuoExpr *right = quo__parser_parse_precedence(m, quo__get_parse_rule(op).precedence);
   QuoExpr *expr = quo__expr_new(QUO_EXPR_BINARY, op);
   expr->binary.left = left;
   expr->binary.op = op;
@@ -2694,23 +2700,11 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
   case QUO_EXPR_LITERAL: {
     QuoVar constant = {0};
     switch (e->token.type) {
-    case QUO_TT_TRUE:
-      constant.type = QUO_VAR_TYPE_BOOL;
-      constant.val_num = 1.0;
-      break;
-    case QUO_TT_FALSE:
-      constant.type = QUO_VAR_TYPE_BOOL;
-      constant.val_num = 0.0;
-      break;
-    case QUO_TT_NIL: constant.type = QUO_VAR_TYPE_NIL; break;
-    case QUO_TT_LITERAL_NUM:
-      constant.type = QUO_VAR_TYPE_NUM;
-      constant.val_num = quo_strtod(e->token.start, e->token.len);
-      break;
-    case QUO_TT_LITERAL_STR:
-      constant.type = QUO_VAR_TYPE_OBJ;
-      constant.val_obj = (QuoObj *)quo_str_new(c->m, e->token.start, e->token.len);
-      break;
+    case QUO_TT_TRUE: constant = quo_var_new_bool(true); break;
+    case QUO_TT_FALSE: constant = quo_var_new_bool(false); break;
+    case QUO_TT_NIL: constant = quo_var_new_nil(); break;
+    case QUO_TT_LITERAL_NUM: constant = quo_var_new_num(quo_strtod(e->token.start, e->token.len)); break;
+    case QUO_TT_LITERAL_STR: constant = quo_var_new_obj(quo_str_new(c->m, e->token.start, e->token.len)); break;
     default: break;
     }
     uint64_t index = quo__function_push_constant(c->fn, &constant);
