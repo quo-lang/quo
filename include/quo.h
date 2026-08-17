@@ -398,6 +398,12 @@ typedef struct QuoModule {
   QuoModuleCleanupFn cleanup_fn;
 } QuoModule;
 
+// Create new QuoModule.
+// Arguments:
+//  - `file_path`: Path of the file to report errors.
+//  - `name`: Name of the module.
+//  - `cwd`: Current working directory.
+//  - `source`: Source code of the module.
 QuoModule *quo_module_new(const char *file_path, const char *name, const char *cwd, const char *source);
 void quo_module_add_export(QuoModule *module, QuoStr *name, QuoVar value);
 // Register a global C function for accessing in quo.
@@ -1692,6 +1698,7 @@ void quo_module_register_cfn(QuoModule *m, const char *name, int64_t name_len, Q
 }
 
 QuoVar quo_module_run(QuoModule *m) {
+  if (m->had_compile_error) return quo_var_new_nil();
   QuoVM *vm = quo_vm_new(m);
   QuoVar result = quo_vm_run(vm, m->fn);
   quo_vm_free(vm);
@@ -1920,7 +1927,7 @@ int64_t quo_var_print(QuoVar *v) {
       return len;
     }
     case QUO_OBJ_TYPE_MODULE: return printf("<module %s>", quo_obj_as_module(v->val_obj)->name->data);
-    case QUO_OBJ_TYPE_FN: return printf("<fn %s(%d)>", quo_obj_as_fn(v->val_obj)->name->data, quo_obj_as_fn(v->val_obj)->arity);
+    case QUO_OBJ_TYPE_FN: return printf("<fn %s>", quo_obj_as_fn(v->val_obj)->name->data);
     case QUO_OBJ_TYPE_CFN: return printf("<cfn %s>", quo_obj_as_cfn(v->val_obj)->name->data);
     case QUO_OBJ_TYPE_USER: return printf("<%s>", v->val_obj->name->data);
     }
@@ -2225,6 +2232,7 @@ static QuoExpr *quo__parser_parse_precedence(QuoModule *m, enum QuoPrecedence pr
 static QuoExpr *quo__parser_expression(QuoModule *m) { return quo__parser_parse_precedence(m, PREC_NONE); }
 
 static QuoExpr *quo__parser_literal(QuoModule *m) {
+  // Array literal
   if (m->previous.type == QUO_TT_OBRACKET) {
     QuoExpr *expr = quo__expr_new(QUO_EXPR_ARRAY, m->previous);
     if (!quo__parser_check(m, QUO_TT_CBRACKET)) {
@@ -2239,7 +2247,9 @@ static QuoExpr *quo__parser_literal(QuoModule *m) {
     }
     quo__parser_expect(m, QUO_TT_CBRACKET, "Expected ']' after array elements");
     return expr;
-  } else if (m->previous.type == QUO_TT_OBRACE) {
+  }
+  // Dictionary literal
+  else if (m->previous.type == QUO_TT_OBRACE) {
     QuoExpr *expr = quo__expr_new(QUO_EXPR_DICT, m->previous);
     if (!quo__parser_check(m, QUO_TT_CBRACE)) {
       do {
@@ -2261,7 +2271,11 @@ static QuoExpr *quo__parser_literal(QuoModule *m) {
     }
     quo__parser_expect(m, QUO_TT_CBRACE, "Expected '}' after dictionary literal");
     return expr;
-  } else return quo__expr_new(QUO_EXPR_LITERAL, m->previous);
+  }
+  // Number or string
+  else {
+    return quo__expr_new(QUO_EXPR_LITERAL, m->previous);
+  }
 }
 
 static QuoExpr *quo__parser_fn_expr(QuoModule *m) {
@@ -2363,7 +2377,6 @@ static QuoExpr *quo__parser_ternary_expr(QuoModule *m, QuoExpr *condition) {
 
 static QuoExpr *quo__parser_id(QuoModule *m) {
   if (!quo__parser_is_declared(m, m->previous)) {
-    // Check if it's a C function or namespace registered in state
     QuoStr *key = quo_str_new(m, m->previous.start, m->previous.len);
     QuoVar value;
     if (quo_ht_get(&m->globals, key, &value)) return quo__parser_variable(m);
@@ -2465,13 +2478,12 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
   // Block {}
   else if (quo__parser_match(m, QUO_TT_OBRACE)) {
     quo__parser_begin_scope(m); // New scope for block
-    QuoStmtList old_stmts = m->ast;
     QuoStmtList block_stmts = {0};
-    m->ast = block_stmts;
-    while (!quo__parser_check(m, QUO_TT_CBRACE) && !quo__parser_check(m, QUO_TT_EOF)) quo__parser_stmt(m);
+    while (!quo__parser_check(m, QUO_TT_CBRACE) && !quo__parser_check(m, QUO_TT_EOF)) {
+      QuoStmt *stmt = quo__parser_stmt(m);
+      if (stmt) da_add(&block_stmts, stmt);
+    }
     quo__parser_expect(m, QUO_TT_CBRACE, "Expected '}' after block");
-    block_stmts = m->ast;
-    m->ast = old_stmts;
     quo__parser_end_scope(m); // End scope
     stmt = quo__stmt_new(QUO_STMT_BLOCK);
     stmt->block = block_stmts;
@@ -2494,12 +2506,11 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
     else {
       // Single statement - wrap in a block
       quo__parser_begin_scope(m);
-      QuoStmtList old_ast = m->ast;
-      m->ast = (QuoStmtList){0};
-      quo__parser_stmt(m);
+      QuoStmtList ast = {0};
+      QuoStmt *stmt = quo__parser_stmt(m);
+      if (stmt) da_add(&ast, stmt);
       then_branch = quo__stmt_new(QUO_STMT_BLOCK);
-      then_branch->block = m->ast;
-      m->ast = old_ast;
+      then_branch->block = ast;
       quo__parser_end_scope(m);
     }
     // Parse else branch (optional)
@@ -2510,12 +2521,11 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
       else {
         // Single statement after else
         quo__parser_begin_scope(m);
-        QuoStmtList old_ast = m->ast;
-        m->ast = (QuoStmtList){0};
-        quo__parser_stmt(m);
+        QuoStmtList ast = {0};
+        QuoStmt *stmt = quo__parser_stmt(m);
+        if (stmt) da_add(&ast, stmt);
         else_branch = quo__stmt_new(QUO_STMT_BLOCK);
-        else_branch->block = m->ast;
-        m->ast = old_ast;
+        else_branch->block = ast;
         quo__parser_end_scope(m);
       }
     }
@@ -2547,12 +2557,11 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
     else {
       // Single statement - wrap in a block
       quo__parser_begin_scope(m);
-      QuoStmtList old_ast = m->ast;
-      m->ast = (QuoStmtList){0};
-      quo__parser_stmt(m);
+      QuoStmtList ast = {0};
+      QuoStmt *stmt = quo__parser_stmt(m);
+      if (stmt) da_add(&ast, stmt);
       body = quo__stmt_new(QUO_STMT_BLOCK);
-      body->block = m->ast;
-      m->ast = old_ast;
+      body->block = ast;
       quo__parser_end_scope(m);
     }
     stmt = quo__stmt_new(QUO_STMT_LOOP);
