@@ -408,7 +408,7 @@ QuoModule *quo_module_new(const char *file_path, const char *name, const char *c
 void quo_module_add_export(QuoModule *module, QuoStr *name, QuoVar value);
 // Register a global C function for accessing in quo.
 // `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
-void quo_module_register_cfn(QuoModule *m, const char *name, int64_t name_len, QuoCFunctionPtr fn);
+void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr fn);
 QuoVar quo_module_run(QuoModule *m);
 
 static inline bool quo_obj_is_module(const QuoObj *o) { return o->type == QUO_OBJ_TYPE_MODULE; }
@@ -438,8 +438,6 @@ bool quo_state_namespace_add(QuoModule *m, QuoDict *ns, QuoStr *name, QuoVar val
 // Convenience function for adding a C function to a namespace.
 // Add a C function to a namespace created by `quo_state_register_namespace()`.
 void quo_state_namespace_add_cfn(QuoModule *m, QuoDict *ns, const char *fn_name, QuoCFunctionPtr fn);
-// Free the state and all associated resources.
-void quo_state_free(QuoModule *m);
 
 // --- VARIABLE TYPES --- //
 
@@ -1269,6 +1267,12 @@ bool quo_dict_set(QuoDict *dict, QuoStr *key, QuoVar *value) {
   quo_var_ref(value);
   return quo_ht_set(&dict->dict, key, value);
 }
+bool quo_dict_del(QuoDict *dict, QuoStr *key) {
+  QuoVar value;
+  if (!quo_ht_get(&dict->dict, key, &value)) return false;
+  quo_var_unref(&value);
+  return quo_ht_del(&dict->dict, key);
+}
 
 // --- FN FUNCTIONS --- //
 
@@ -1570,6 +1574,11 @@ static QuoVar quo__dict_method_has(QuoModule *m, int64_t argc, QuoVar *argv) {
   QuoVar val = quo_dict_get(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]));
   return quo_var_new_bool(!quo_var_is_nil(&val));
 }
+static QuoVar quo__dict_method_del(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 2 && !quo_var_is_str(&argv[1])) return quo_var_new_err("del() requires key string argument");
+  quo_dict_del(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]));
+  return quo_var_new_nil();
+}
 static QuoVar quo__dict_method_keys(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 1) return quo_var_new_err("keys() requires no arguments");
   QuoArr *keys = quo_arr_new();
@@ -1668,6 +1677,7 @@ QuoModule *quo_module_new(const char *file_path, const char *name, const char *c
   quo__register_builtin_method(m, &m->dict_methods, "get", quo__dict_method_get);
   quo__register_builtin_method(m, &m->dict_methods, "set", quo__dict_method_set);
   quo__register_builtin_method(m, &m->dict_methods, "has", quo__dict_method_has);
+  quo__register_builtin_method(m, &m->dict_methods, "del", quo__dict_method_del);
   quo__register_builtin_method(m, &m->dict_methods, "keys", quo__dict_method_keys);
   quo__register_builtin_method(m, &m->dict_methods, "values", quo__dict_method_values);
 
@@ -1678,27 +1688,23 @@ QuoModule *quo_module_new(const char *file_path, const char *name, const char *c
   m->pos = 0;
   m->line = 1;
   m->column = 1;
-  da_add(&m->scopes, (QuoTokenList){0}); // Start global scope
-
+  da_add(&m->scopes, (QuoTokenList){0}); // Start global parser scope
   quo__parser_advance(m);
   while (!quo__parser_check(m, QUO_TT_EOF)) {
     QuoStmt *stmt = quo__parser_stmt(m);
     if (stmt) da_add(&m->ast, stmt);
   }
-
   if (m->had_compile_error) {
     quo_obj_unref((QuoObj *)m);
     return NULL;
   }
-
   QuoCompiler *compiler = quo_compiler_new(m, "__main_fn__", -1);
   m->fn = quo_compiler_compile(compiler, m->ast);
   quo_compiler_free(compiler);
-
   return m;
 }
 
-void quo_module_register_cfn(QuoModule *m, const char *name, int64_t name_len, QuoCFunctionPtr fn) {
+void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr fn) {
   QuoCFn *cfn = quo_cfunction_new(m, name, name_len, fn);
   QuoVar var = quo_var_new_obj(cfn);
   quo_ht_set(&m->globals, cfn->name, &var);
