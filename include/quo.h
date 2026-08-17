@@ -2133,11 +2133,11 @@ static void quo__expr_free(QuoExpr *expr) {
   quo_dealloc(expr);
 }
 
-// Parse rules table
-static struct {
+// Parse rules
+typedef struct {
   QuoExpr *(*prefix)(QuoModule *);
   QuoExpr *(*infix)(QuoModule *, QuoExpr *);
-  // QuoPrecedence levels (lowest to highest)
+  // Precedence levels (lowest to highest)
   enum QuoPrecedence {
     PREC_NONE,
     PREC_ASSIGNMENT, // =
@@ -2152,85 +2152,71 @@ static struct {
     PREC_CALL,       // . ()
     PREC_PRIMARY
   } precedence;
-} rules[] = {
-    [QUO_TT_ERROR] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_EOF] = {NULL, NULL, PREC_NONE},
+} QuoParseRule;
 
-    // Identifiers
-    [QUO_TT_ID] = {quo__parser_id, NULL, PREC_NONE},
+static QuoParseRule quo__get_parse_rule(QuoToken t) {
+  switch (t.type) {
+  case QUO_TT_NONE:
+  case QUO_TT_EOF:
+  case QUO_TT_ERROR:
+  case QUO_TT_COMMENT:
+  case QUO_TT_VAR:
+  case QUO_TT_LOOP:
+  case QUO_TT_BREAK:
+  case QUO_TT_CONTINUE:
+  case QUO_TT_IF:
+  case QUO_TT_ELSE:
+  case QUO_TT_RETURN:
+  case QUO_TT_IMPORT:
+  case QUO_TT_CPAREN:
+  case QUO_TT_CBRACE:
+  case QUO_TT_CBRACKET:
+  case QUO_TT_COMMA:
+  case QUO_TT_COLON:
+  case QUO_TT_AS: return (QuoParseRule){0};
 
-    // Literals
-    [QUO_TT_LITERAL_NUM] = {quo__parser_literal, NULL, PREC_NONE},
-    [QUO_TT_LITERAL_STR] = {quo__parser_literal, NULL, PREC_NONE},
-    [QUO_TT_TRUE] = {quo__parser_literal, NULL, PREC_NONE},
-    [QUO_TT_FALSE] = {quo__parser_literal, NULL, PREC_NONE},
-    [QUO_TT_NIL] = {quo__parser_literal, NULL, PREC_NONE},
-    [QUO_TT_OBRACKET] = {quo__parser_literal, NULL, PREC_NONE},
-    [QUO_TT_OBRACE] = {quo__parser_literal, NULL, PREC_NONE},
-
-    // Keywords (not expressions)
-    [QUO_TT_FN] = {quo__parser_fn_expr, NULL, PREC_NONE},
-    [QUO_TT_LOOP] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_BREAK] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_CONTINUE] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_IF] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_ELSE] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_RETURN] = {NULL, NULL, PREC_NONE},
-
-    // Delimiters
-    [QUO_TT_OPAREN] = {quo__parser_grouping, quo__parser_call, PREC_CALL},
-    [QUO_TT_CPAREN] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_CBRACE] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_CBRACKET] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_COMMA] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_COLON] = {NULL, NULL, PREC_NONE},
-    [QUO_TT_COMMENT] = {NULL, NULL, PREC_NONE},
-
-    // Unary operators (prefix)
-    [QUO_TT_MINUS] = {quo__parser_unary, quo__parser_binary, PREC_TERM},
-    [QUO_TT_BANG] = {quo__parser_unary, NULL, PREC_NONE},
-
-    // Arithmetic operators (infix)
-    [QUO_TT_PLUS] = {NULL, quo__parser_binary, PREC_TERM},
-    [QUO_TT_STAR] = {NULL, quo__parser_binary, PREC_FACTOR},
-    [QUO_TT_SLASH] = {NULL, quo__parser_binary, PREC_FACTOR},
-    [QUO_TT_MOD] = {NULL, quo__parser_binary, PREC_FACTOR},
-
-    // Comparison operators (infix)
-    [QUO_TT_LT] = {NULL, quo__parser_binary, PREC_COMPARISON},
-    [QUO_TT_GT] = {NULL, quo__parser_binary, PREC_COMPARISON},
-    [QUO_TT_LTEQ] = {NULL, quo__parser_binary, PREC_COMPARISON},
-    [QUO_TT_GTEQ] = {NULL, quo__parser_binary, PREC_COMPARISON},
-
-    // Equality operators (infix)
-    [QUO_TT_DOUBLEEQ] = {NULL, quo__parser_binary, PREC_EQUALITY},
-    [QUO_TT_BANGEQ] = {NULL, quo__parser_binary, PREC_EQUALITY},
-
-    // Logical operators (infix)
-    [QUO_TT_AND] = {NULL, quo__parser_binary, PREC_AND},
-    [QUO_TT_OR] = {NULL, quo__parser_binary, PREC_OR},
-
-    // Assignment operators (infix)
-    [QUO_TT_EQ] = {NULL, quo__parser_assignment_expr, PREC_ASSIGNMENT},
-    [QUO_TT_PLUSEQ] = {NULL, quo__parser_assignment_expr, PREC_ASSIGNMENT},
-    [QUO_TT_MINUSEQ] = {NULL, quo__parser_assignment_expr, PREC_ASSIGNMENT},
-    [QUO_TT_MULEQ] = {NULL, quo__parser_assignment_expr, PREC_ASSIGNMENT},
-    [QUO_TT_DIVEQ] = {NULL, quo__parser_assignment_expr, PREC_ASSIGNMENT},
-
-    [QUO_TT_QUESTION] = {NULL, quo__parser_ternary_expr, PREC_TERNARY},
-
-    // Access operators
-    [QUO_TT_DOT] = {NULL, quo__parser_member_access, PREC_CALL},
-};
+  case QUO_TT_ID: return (QuoParseRule){quo__parser_id, NULL, PREC_NONE};
+  case QUO_TT_LITERAL_NUM:
+  case QUO_TT_LITERAL_STR:
+  case QUO_TT_TRUE:
+  case QUO_TT_FALSE:
+  case QUO_TT_NIL:
+  case QUO_TT_OBRACE:
+  case QUO_TT_OBRACKET: return (QuoParseRule){quo__parser_literal, NULL, PREC_NONE};
+  case QUO_TT_FN: return (QuoParseRule){quo__parser_fn_expr, NULL, PREC_NONE};
+  case QUO_TT_AND: return (QuoParseRule){NULL, quo__parser_binary, PREC_AND};
+  case QUO_TT_OR: return (QuoParseRule){NULL, quo__parser_binary, PREC_OR};
+  case QUO_TT_BANGEQ:
+  case QUO_TT_DOUBLEEQ: return (QuoParseRule){NULL, quo__parser_binary, PREC_EQUALITY};
+  case QUO_TT_DOT: return (QuoParseRule){NULL, quo__parser_member_access, PREC_CALL};
+  case QUO_TT_OPAREN: return (QuoParseRule){quo__parser_grouping, quo__parser_call, PREC_CALL};
+  case QUO_TT_EQ:
+  case QUO_TT_DIVEQ:
+  case QUO_TT_MULEQ:
+  case QUO_TT_MINUSEQ:
+  case QUO_TT_PLUSEQ: return (QuoParseRule){NULL, quo__parser_assignment_expr, PREC_ASSIGNMENT};
+  case QUO_TT_GTEQ:
+  case QUO_TT_LTEQ:
+  case QUO_TT_LT:
+  case QUO_TT_GT: return (QuoParseRule){NULL, quo__parser_binary, PREC_COMPARISON};
+  case QUO_TT_PLUS: return (QuoParseRule){NULL, quo__parser_binary, PREC_TERM};
+  case QUO_TT_MINUS: return (QuoParseRule){quo__parser_unary, quo__parser_binary, PREC_TERM};
+  case QUO_TT_STAR:
+  case QUO_TT_SLASH:
+  case QUO_TT_MOD: return (QuoParseRule){NULL, quo__parser_binary, PREC_FACTOR};
+  case QUO_TT_BANG: return (QuoParseRule){quo__parser_unary, NULL, PREC_NONE};
+  case QUO_TT_QUESTION: return (QuoParseRule){NULL, quo__parser_ternary_expr, PREC_TERNARY};
+  }
+}
 
 static QuoExpr *quo__parser_parse_precedence(QuoModule *m, enum QuoPrecedence precedence) {
   quo__parser_advance(m);
-  QuoExpr *(*prefix)(QuoModule *) = rules[m->previous.type].prefix;
+  QuoExpr *(*prefix)(QuoModule *) = quo__get_parse_rule(m->previous).prefix;
   if (!prefix) quo__parser_error(m, m->previous, "Expected expression");
   QuoExpr *left = prefix(m);
-  while (precedence < rules[m->current.type].precedence) {
+  while (precedence < quo__get_parse_rule(m->current).precedence) {
     quo__parser_advance(m);
-    QuoExpr *(*infix)(QuoModule *, QuoExpr *) = rules[m->previous.type].infix;
+    QuoExpr *(*infix)(QuoModule *, QuoExpr *) = quo__get_parse_rule(m->previous).infix;
     left = infix(m, left);
   }
   return left;
@@ -2326,7 +2312,7 @@ static QuoExpr *quo__parser_unary(QuoModule *m) {
 // Parse a binary expression: expr op expr
 static QuoExpr *quo__parser_binary(QuoModule *m, QuoExpr *left) {
   QuoToken op = m->previous;
-  enum QuoPrecedence precedence = rules[op.type].precedence;
+  enum QuoPrecedence precedence = quo__get_parse_rule(op).precedence;
   QuoExpr *right = quo__parser_parse_precedence(m, precedence);
   QuoExpr *expr = quo__expr_new(QUO_EXPR_BINARY, op);
   expr->binary.left = left;
