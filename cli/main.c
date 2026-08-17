@@ -49,7 +49,7 @@ static int quo__run(const char *path) {
     return 1;
   }
   char *cwd = quo_dirname(path);
-  QuoModule *m = quo_module_new(path, "__main__", cwd, source);
+  QuoModule *m = quo_module_new(NULL, path, "__main__", cwd, source);
   quo_dealloc(source);
   quo_dealloc(cwd);
   // If module is NULL, there was compilation error.
@@ -75,8 +75,8 @@ static int quo__run(const char *path) {
     exit_code = 1;
   } else if (quo_var_is_num(&result)) exit_code = (int)result.val_num;
   quo_var_unref(&result);
-  //   quo_vm_free(vm);
   quo_obj_unref((QuoObj *)m);
+  // quo_vm_free(vm);
 
   return exit_code;
 }

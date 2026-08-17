@@ -7,7 +7,7 @@ C API:
     #include "quo-mod-base64.h"
     ...
     QuoState *s = quo_new_state();
-    quo_state_register_module(s, quo_mod_base64_init, NULL);
+    quo_state_register_module(m, quo_mod_base64_init, NULL);
     ...
 
 QUO API:
@@ -48,7 +48,7 @@ static int quo__base64_decode_char(char c) {
   return -1;
 }
 
-static QuoVar quo__mod_base64_encode_impl(QuoState *s, const char *input, int len, const char *table) {
+static QuoVar quo__mod_base64_encode_impl(QuoModule *m, const char *input, int len, const char *table) {
   QuoStringBuilder sb = quo_sb_new();
   for (int i = 0; i < len; i += 3) {
     int remaining = len - i;
@@ -64,12 +64,12 @@ static QuoVar quo__mod_base64_encode_impl(QuoState *s, const char *input, int le
     else da_add(&sb, '=');
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(s, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
 
-static QuoVar quo__mod_base64_decode_impl(QuoState *s, const char *input, int len) {
+static QuoVar quo__mod_base64_decode_impl(QuoModule *m, const char *input, int len) {
   QuoStringBuilder sb = quo_sb_new();
   int padding = 0;
   if (len > 0 && input[len - 1] == '=') padding++;
@@ -98,44 +98,44 @@ static QuoVar quo__mod_base64_decode_impl(QuoState *s, const char *input, int le
     if (valid_sextets >= 4) da_add(&sb, triple & 0xFF);
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(s, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_base64_encode(QuoState *s, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_base64_encode(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.encode() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[1].val_obj);
-  return quo__mod_base64_encode_impl(s, str->data, str->len, quo__base64_table);
+  return quo__mod_base64_encode_impl(m, str->data, str->len, quo__base64_table);
 }
 
-static inline QuoVar quo__mod_base64_decode(QuoState *s, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_base64_decode(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.decode() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[1].val_obj);
-  return quo__mod_base64_decode_impl(s, str->data, str->len);
+  return quo__mod_base64_decode_impl(m, str->data, str->len);
 }
 
-static inline QuoVar quo__mod_base64_encode_url(QuoState *s, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_base64_encode_url(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.encode_url() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[1].val_obj);
-  return quo__mod_base64_encode_impl(s, str->data, str->len, quo__base64_url_table);
+  return quo__mod_base64_encode_impl(m, str->data, str->len, quo__base64_url_table);
 }
 
-static inline QuoVar quo__mod_base64_decode_url(QuoState *s, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_base64_decode_url(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.decode_url() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[1].val_obj);
-  return quo__mod_base64_decode_impl(s, str->data, str->len);
+  return quo__mod_base64_decode_impl(m, str->data, str->len);
 }
 
 // ---------- PUBLIC API ---------- //
 
-static inline bool quo_mod_base64_init(QuoState *s) {
-  QuoDict *ns = quo_state_register_namespace(s, "base64");
-  quo_state_namespace_add_cfn(s, ns, "encode", quo__mod_base64_encode);
-  quo_state_namespace_add_cfn(s, ns, "decode", quo__mod_base64_decode);
-  quo_state_namespace_add_cfn(s, ns, "encode_url", quo__mod_base64_encode_url);
-  quo_state_namespace_add_cfn(s, ns, "decode_url", quo__mod_base64_decode_url);
-  return true;
+static inline QuoModule *quo_mod_base64_new(QuoModule *parent) {
+  QuoModule *m = quo_module_new(parent, "base64", parent->file_path, parent->cwd, NULL);
+  quo_module_register_cfn(m, "encode", -1, quo__mod_base64_encode);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
+  quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);
+  quo_module_register_cfn(m, "decode_url", -1, quo__mod_base64_decode_url);
+  return m;
 }
 
 #ifdef __cplusplus

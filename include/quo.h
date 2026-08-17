@@ -336,8 +336,10 @@ typedef struct QuoDict {
 } QuoDict;
 
 QuoDict *quo_dict_new();
+bool quo_dict_has(QuoDict *dict, QuoStr *key);
 QuoVar quo_dict_get(QuoDict *dict, QuoStr *key);
 bool quo_dict_set(QuoDict *dict, QuoStr *key, QuoVar *value);
+bool quo_dict_del(QuoDict *dict, QuoStr *key);
 
 static inline QuoDict *quo_obj_as_dict(const QuoObj *o) { return (QuoDict *)o; }
 
@@ -369,9 +371,10 @@ typedef void (*QuoModuleCleanupFn)(QuoModule *);
 typedef bool (*QuoModuleInitFn)(QuoModule *);
 
 typedef struct QuoModule {
-  QuoObj obj; // Base class
-
-  QuoStr *name; // Module name or alias
+  QuoObj obj;        // Base class
+  QuoStr *name;      // Module name or alias
+  QuoModule *parent; // Parent module
+  QuoDict *modules;  // Imported modules
 
   QuoHashTable types;        // User-defined types registry
   QuoHashTable string_table; // String interning
@@ -400,11 +403,12 @@ typedef struct QuoModule {
 
 // Create new QuoModule.
 // Arguments:
+//  - `parent`: Parent module. NULL for top-level modules.
 //  - `file_path`: Path of the file to report errors.
 //  - `name`: Name of the module.
 //  - `cwd`: Current working directory.
 //  - `source`: Source code of the module.
-QuoModule *quo_module_new(const char *file_path, const char *name, const char *cwd, const char *source);
+QuoModule *quo_module_new(QuoModule *parent, const char *name, const char *file_path, const char *cwd, const char *source);
 void quo_module_add_export(QuoModule *module, QuoStr *name, QuoVar value);
 // Register a global C function for accessing in quo.
 // `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
@@ -1140,8 +1144,10 @@ void quo_obj_unref(QuoObj *obj) {
 
     // Free main function first
     if (m->fn) quo_obj_unref((QuoObj *)m->fn);
+    quo_obj_unref((QuoObj *)m->modules);
 
     // Free globals and method tables
+    quo_ht_free(&m->types);
     quo_ht_free(&m->globals);
     quo_ht_free(&m->str_methods);
     quo_ht_free(&m->arr_methods);
@@ -1257,6 +1263,10 @@ QuoDict *quo_dict_new() {
   QuoDict *dict = (QuoDict *)quo_obj_new(sizeof(QuoDict));
   dict->obj.type = QUO_OBJ_TYPE_DICT;
   return dict;
+}
+bool quo_dict_has(QuoDict *dict, QuoStr *key) {
+  QuoVar value;
+  return quo_ht_get(&dict->dict, key, &value);
 }
 QuoVar quo_dict_get(QuoDict *dict, QuoStr *key) {
   QuoVar value;
@@ -1571,8 +1581,7 @@ static QuoVar quo__dict_method_set(QuoModule *m, int64_t argc, QuoVar *argv) {
 }
 static QuoVar quo__dict_method_has(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 2 && !quo_var_is_str(&argv[1])) return quo_var_new_err("has() requires key string argument");
-  QuoVar val = quo_dict_get(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]));
-  return quo_var_new_bool(!quo_var_is_nil(&val));
+  return quo_var_new_bool(quo_dict_has(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1])));
 }
 static QuoVar quo__dict_method_del(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 2 && !quo_var_is_str(&argv[1])) return quo_var_new_err("del() requires key string argument");
@@ -1633,14 +1642,26 @@ static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
   return value.val_obj;
 }
 
-QuoModule *quo_module_new(const char *file_path, const char *name, const char *cwd, const char *source) {
-  assert(name != NULL && cwd != NULL && source != NULL);
+// --- MODULE --- //
 
-  srand((unsigned int)time(NULL));
+static QuoModule *quo__module_find_mod(QuoModule *m, QuoStr *mod_name) {
+  assert(m != NULL && mod_name != NULL);
+  QuoModule *mod = m;
+  while (mod) {
+    QuoVar value = quo_dict_get(mod->modules, mod_name);
+    if (quo_var_is_module(&value)) return quo_var_as_module(&value);
+    mod = mod->parent;
+  }
+  return NULL;
+}
 
+QuoModule *quo_module_new(QuoModule *parent, const char *name, const char *file_path, const char *cwd, const char *source) {
   QuoModule *m = (QuoModule *)quo_obj_new(sizeof(QuoModule));
   m->obj.type = QUO_OBJ_TYPE_MODULE;
 
+  m->modules = quo_dict_new();
+
+  quo_ht_init(&m->types);
   quo_ht_init(&m->string_table);
   quo_ht_init(&m->str_methods);
   quo_ht_init(&m->arr_methods);
@@ -1681,26 +1702,28 @@ QuoModule *quo_module_new(const char *file_path, const char *name, const char *c
   quo__register_builtin_method(m, &m->dict_methods, "keys", quo__dict_method_keys);
   quo__register_builtin_method(m, &m->dict_methods, "values", quo__dict_method_values);
 
-  m->name = quo_str_new(m, name, -1);
+  m->parent = parent;
+  m->name = name ? quo_str_new(m, name, -1) : quo_str_new(m, "<anonymous>", -1);
   m->cwd = quo_strdup(cwd);
-  m->source = quo_strdup(source);
   m->file_path = quo_strdup(file_path);
-  m->pos = 0;
-  m->line = 1;
-  m->column = 1;
-  da_add(&m->scopes, (QuoTokenList){0}); // Start global parser scope
-  quo__parser_advance(m);
-  while (!quo__parser_check(m, QUO_TT_EOF)) {
-    QuoStmt *stmt = quo__parser_stmt(m);
-    if (stmt) da_add(&m->ast, stmt);
+  if (source) {
+    m->source = quo_strdup(source);
+    m->pos = 0;
+    m->line = m->column = 1;
+    da_add(&m->scopes, (QuoTokenList){0}); // Start global parser scope
+    quo__parser_advance(m);
+    while (!quo__parser_check(m, QUO_TT_EOF)) {
+      QuoStmt *stmt = quo__parser_stmt(m);
+      if (stmt) da_add(&m->ast, stmt);
+    }
+    if (m->had_compile_error) {
+      quo_obj_unref((QuoObj *)m);
+      return NULL;
+    }
+    QuoCompiler *compiler = quo_compiler_new(m, "__main_fn__", -1);
+    m->fn = quo_compiler_compile(compiler, m->ast);
+    quo_compiler_free(compiler);
   }
-  if (m->had_compile_error) {
-    quo_obj_unref((QuoObj *)m);
-    return NULL;
-  }
-  QuoCompiler *compiler = quo_compiler_new(m, "__main_fn__", -1);
-  m->fn = quo_compiler_compile(compiler, m->ast);
-  quo_compiler_free(compiler);
   return m;
 }
 
@@ -2598,59 +2621,57 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
 
   // Import
   else if (quo__parser_match(m, QUO_TT_IMPORT)) {
-    // if (da_count(&m->scopes) > 1) quo__parser_error(m, m->previous, "Import statements can only be used at global scope");
-    // quo__parser_expect(m, QUO_TT_LITERAL_STR, "Expected import path string");
-    // QuoToken path = m->previous;
-    // // Resolve the module path
-    // char *mod_path = quo_strdupf("%s/%.*s.quo", m->s->cwd, path.len, path.start);
-    // // Resolve the module name. If has an alias, use it, otherwise use the file name.
-    // char *mod_name;
-    // if (quo__parser_match(m, QUO_TT_AS)) {
-    //   if (quo__parser_match(m, QUO_TT_LITERAL_STR)) mod_name = quo_strndup(m->previous.start, m->previous.len);
-    //   else quo__parser_error(m, m->current, "Module alias should be a string literal");
-    // } else mod_name = quo_file_name(mod_path);
-    // // Create and compile the module
-    // QuoModule *module = quo_module_new(m->s, mod_name, -1);
-    // quo_dealloc(mod_name);
-    // // Parse the module
-    // QuoParser *mod_parser = quo_parser_new(module->state, mod_path);
-    // quo_dealloc(mod_path);
-    // if (!mod_parser) {
-    //   quo__parser_error(m, m->current, "Module not found: %.*s", path.len, path.start);
-    //   quo_parser_free(mod_parser);
-    //   quo_obj_unref((QuoObj *)module);
-    //   return NULL;
-    // }
-    // if (!quo_parser_parse(mod_parser)) {
-    //   quo_parser_free(mod_parser);
-    //   quo_obj_unref((QuoObj *)module);
-    //   return NULL;
-    // }
-    // // Compile the module's AST into a function and run it
-    // QuoCompiler *mod_compiler = quo_compiler_new(module->state, mod_parser->file_name, -1);
-    // QuoFn *main_fn = quo_compiler_compile(mod_compiler, mod_parser->ast);
-    // quo_compiler_free(mod_compiler);
-    // quo_parser_free(mod_parser);
-    // QuoVM *vm = quo_vm_new(module->state);
-    // if (!vm) return NULL;
-    // QuoVar result = quo_vm_run(vm, main_fn);
-    // // TODO ref globals
-    // // quo_vm_free(vm);
+    if (da_count(&m->scopes) > 1) quo__parser_error(m, m->previous, "Import statements can only be used at global scope");
+    quo__parser_expect(m, QUO_TT_LITERAL_STR, "Expected import path string");
+    QuoToken path = m->previous;
+    // Resolve the module path
+    char *mod_path = quo_strdupf("%s/%.*s.quo", m->cwd, path.len, path.start);
+    // Resolve the module name. If has an alias, use it, otherwise use the file name.
+    char *mod_name;
+    if (quo__parser_match(m, QUO_TT_AS)) {
+      if (quo__parser_match(m, QUO_TT_LITERAL_STR)) mod_name = quo_strndup(m->previous.start, m->previous.len);
+      else quo__parser_error(m, m->current, "Module alias should be a string literal");
+    } else mod_name = quo_file_name(mod_path);
+    // Create and compile the module
+    char *mod_cwd = quo_strdupf("%s/%.*s", m->cwd, path.len, path.start);
+    char *mod_source = quo_read_file(mod_path);
+    if (!mod_source) {
+      quo__parser_error(m, m->current, "Module not found: %.*s", path.len, path.start);
+      return NULL;
+    }
+    QuoModule *mod = quo_module_new(m, mod_name, mod_path, mod_cwd, mod_source);
+    quo_dealloc(mod_source);
+    quo_dealloc(mod_cwd);
+    quo_dealloc(mod_name);
+    quo_dealloc(mod_path);
+    if (!mod) return NULL;
 
-    // // Declare the module name in the current scope
-    // QuoToken module_name = {
-    //     .start = module->name->data,
-    //     .len = module->name->len,
-    //     .type = QUO_TT_ID,
-    //     .line = path.line,
-    //     .column = path.column,
-    // };
-    // if (quo__parser_is_declared_in_current_scope(m, module_name)) {
-    //   quo__parser_error(m, module_name, "Variable '" QUO_TOKEN_FMT "' already declared in this scope", QUO_TOKEN_ARG(module_name));
-    // }
-    // quo__parser_declare_variable(m, module_name);
+    QuoVM *vm = quo_vm_new(mod);
+    if (!vm) return NULL;
+    QuoVar result = quo_vm_run(vm, mod->fn);
+    if (quo_var_is_err(&result)) {
+      quo__parser_error(m, m->current, "Module '%s' failed to compile: %s", mod->name->data, result.val_err);
+      quo_vm_free(vm);
+      return NULL;
+    }
+    quo_vm_free(vm);
+
+    // Declare the module name in the global scope
+    QuoToken module_name = {
+        .start = mod->name->data,
+        .len = mod->name->len,
+        .type = QUO_TT_ID,
+        .line = path.line,
+        .column = path.column,
+    };
+    if (quo__parser_is_declared_in_current_scope(m, module_name)) {
+      quo__parser_error(m, module_name, "Variable '" QUO_TOKEN_FMT "' already declared", QUO_TOKEN_ARG(module_name));
+      return NULL;
+    }
+    quo__parser_declare_variable(m, module_name);
+
     stmt = quo__stmt_new(QUO_STMT_IMPORT);
-    // stmt->import = module;
+    stmt->import = mod;
   }
 
   // Expression
