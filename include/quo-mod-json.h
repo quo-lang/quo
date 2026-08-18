@@ -3,14 +3,9 @@
 DESCRIPTION:
     Quo module for JSON encoding/decoding (no dependencies)
 
-C API:
-    #include "quo-mod-json.h"
-    ...
-    QuoState *s = quo_new_state();
-    quo_state_register_module(s, quo_mod_json_init, NULL);
-    ...
-
 QUO API:
+    var json = import("json")
+
     # Parse JSON string to dictionary
     var data = json.decode('{"name": "John", "age": 30, "items": [1, 2, 3]}')
 
@@ -34,7 +29,7 @@ typedef struct {
   const char *json;
   int pos;
   int len;
-  QuoState *s;
+  QuoModule *m;
 } quo__json_parser;
 
 static QuoVar quo__json_parse_value(quo__json_parser *p);
@@ -93,7 +88,7 @@ static QuoVar quo__json_parse_string(quo__json_parser *p) {
     return quo_var_new_err("Unterminated string");
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *str = quo_str_new(p->s, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *str = quo_str_new(p->m, quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(str);
 }
@@ -302,34 +297,33 @@ static void quo__json_stringify_value(QuoStringBuilder *sb, QuoVar *v) {
 
 // ---------- PRIVATE API ---------- //
 
-static inline QuoVar quo__mod_json_decode(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("json.decode() requires a string argument");
+static inline QuoVar quo__mod_json_decode(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("json.decode() requires a string argument");
   quo__json_parser parser;
-  parser.s = s;
-  parser.json = quo_var_as_str(&argv[1])->data;
-  parser.len = quo_var_as_str(&argv[1])->len;
+  parser.m = m;
+  parser.json = quo_var_as_str(&argv[0])->data;
+  parser.len = quo_var_as_str(&argv[0])->len;
   parser.pos = 0;
   QuoVar result = quo__json_parse_value(&parser);
   return result;
 }
 
-static inline QuoVar quo__mod_json_encode(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc != 2) return quo_var_new_err("json.encode() requires one argument");
+static inline QuoVar quo__mod_json_encode(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 1) return quo_var_new_err("json.encode() requires one argument");
   QuoStringBuilder sb = quo_sb_new();
-  quo__json_stringify_value(&sb, &argv[1]);
+  quo__json_stringify_value(&sb, &argv[0]);
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(s, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
 
 // ---------- PUBLIC API ---------- //
 
-static inline bool quo_mod_json_init(QuoState *s) {
-  QuoDict *ns = quo_state_register_namespace(s, "json");
-  quo_state_namespace_add_cfn(s, ns, "decode", quo__mod_json_decode);
-  quo_state_namespace_add_cfn(s, ns, "encode", quo__mod_json_encode);
-  return true;
+static inline void quo_mod_json_init(QuoModule *parent) {
+  QuoModule *m = quo_module_new(parent, parent->cwd, "json", NULL, NULL);
+  quo_module_register_cfn(m, "encode", -1, quo__mod_json_encode);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_json_decode);
 }
 
 #ifdef __cplusplus

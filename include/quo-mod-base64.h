@@ -3,14 +3,9 @@
 DESCRIPTION:
     Quo module for Base64 encoding/decoding
 
-C API:
-    #include "quo-mod-base64.h"
-    ...
-    QuoState *s = quo_new_state();
-    quo_state_register_module(m, quo_mod_base64_init, NULL);
-    ...
-
 QUO API:
+    var base64 = import("base64")
+
     # Encode string to base64
     var encoded = base64.encode("Hello, World!") # Returns "SGVsbG8sIFdvcmxkIQ=="
 
@@ -130,11 +125,11 @@ static inline QuoVar quo__mod_base64_decode_url(QuoModule *m, int64_t argc, QuoV
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_base64_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "base64", NULL);
+  QuoModule *m = quo_module_new(parent, parent->cwd, "base64", NULL, NULL);
   quo_module_register_cfn(m, "encode", -1, quo__mod_base64_encode);
-  // quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
-  // quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);
-  // quo_module_register_cfn(m, "decode_url", -1, quo__mod_base64_decode_url);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
+  quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);
+  quo_module_register_cfn(m, "decode_url", -1, quo__mod_base64_decode_url);
 }
 
 #ifdef __cplusplus

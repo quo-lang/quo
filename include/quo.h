@@ -404,39 +404,28 @@ typedef struct QuoModule {
 //  - `cwd`: Current working directory.
 //  - `file_path`: Path of the file relative to the `cwd`.
 //  - `source`: Source code of the module.
-QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source);
+//  - `cleanup_fn`: Function to call when the module is freed.
+QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn);
+void quo_module_register_var(QuoModule *m, QuoStr *name, QuoVar value);
 // Register a global C function for accessing in quo.
 // `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
 void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr fn);
+
+// Register a type for use in quo.
+// `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
+QuoObj *quo_module_register_type(QuoModule *m, const char *name, int64_t name_len, size_t size);
+QuoObj *quo_module_get_type_instance(QuoModule *m, const char *name, int64_t name_len);
+// Add a method/field to a type registered by `quo_module_register_type()`.
+void quo_module_type_add(QuoObj *type, QuoStr *name, QuoVar value);
+// Convenience function for adding a C function to a type.
+void quo_module_type_add_cfn(QuoModule *m, QuoObj *type, const char *name, int64_t name_len, QuoCFunctionPtr fn);
+
 QuoVar quo_module_run(QuoModule *m);
 
 static inline bool quo_obj_is_module(const QuoObj *o) { return o->type == QUO_OBJ_TYPE_MODULE; }
 static inline QuoModule *quo_obj_as_module(const QuoObj *o) { return (QuoModule *)o; }
 static inline bool quo_var_is_module(const QuoVar *v) { return quo_var_is_obj(v) && v->val_obj->type == QUO_OBJ_TYPE_MODULE; }
 static inline QuoModule *quo_var_as_module(const QuoVar *v) { return quo_obj_as_module(v->val_obj); }
-
-// --- STATE --- //
-
-// Register a module with the given init and cleanup functions.
-void quo_state_register_module(QuoModule *m, QuoModuleInitFn init_fn, QuoModuleCleanupFn cleanup_fn);
-
-// Register a type for use in quo.
-// `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
-QuoObj *quo_state_register_type(QuoModule *m, const char *name, int64_t name_len, size_t size);
-QuoObj *quo_state_get_type_instance(QuoModule *m, const char *name, int64_t name_len);
-// Add a method/field to a type registered by `quo_state_register_type()`.
-void quo_state_type_add(QuoObj *type, QuoStr *name, QuoVar value);
-// Convenience function for adding a C function to a type.
-void quo_state_type_add_cfn(QuoModule *m, QuoObj *type, const char *name, int64_t name_len, QuoCFunctionPtr fn);
-// Register a namespace for organizing C functions.
-// It will create global dictionary e. g. `var my_namespace = { "foo": <cfn foo>, "bar": 69 }`.
-// You can then use `my_namespace.foo()` and `my_namespace.bar` like any dictionary to access fields.
-QuoDict *quo_state_register_namespace(QuoModule *m, const char *name);
-// Add a value to a namespace created by `quo_state_register_namespace()`.
-bool quo_state_namespace_add(QuoModule *m, QuoDict *ns, QuoStr *name, QuoVar value);
-// Convenience function for adding a C function to a namespace.
-// Add a C function to a namespace created by `quo_state_register_namespace()`.
-void quo_state_namespace_add_cfn(QuoModule *m, QuoDict *ns, const char *fn_name, QuoCFunctionPtr fn);
 
 // --- VARIABLE TYPES --- //
 
@@ -570,8 +559,8 @@ void quo_vm_free(QuoVM *vm);
 #define quo__static_array_size(arr) (sizeof(arr) / sizeof(arr[0]))
 
 uint64_t quo_hash(const char *str, uint64_t len);
-// A thread-local 2048 bytes buffer for temporary string formatting.
-const char *quo_tmp_sprintf(const char *fmt, ...);
+// Returns true if the string ends with the given suffix.
+bool quo_strsuffix(const char *str, const char *suffix);
 char *quo_strdup(const char *str);
 char *quo_strdupf(const char *fmt, ...);
 char *quo_strndup(const char *str, uint64_t len);
@@ -1400,7 +1389,7 @@ static QuoVar quo__builtin_import(QuoModule *m, int64_t argc, QuoVar *argv) {
     return quo_var_new_err("Module not found");
   }
   char *mod_cwd = quo_dirname(mod_path);
-  QuoModule *mod = quo_module_new(m, mod_cwd, mod_path, mod_source);
+  QuoModule *mod = quo_module_new(m, mod_cwd, mod_path, mod_source, NULL);
   quo_dealloc(mod_source);
   quo_dealloc(mod_cwd);
   quo_dealloc(mod_path);
@@ -1677,10 +1666,12 @@ static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
 
 // --- MODULE --- //
 
-QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source) {
+QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn) {
+  assert(cwd != NULL && file_path != NULL);
+
   QuoModule *m = (QuoModule *)quo_obj_new(sizeof(QuoModule));
   m->obj.type = QUO_OBJ_TYPE_MODULE;
-
+  m->cleanup_fn = cleanup_fn;
   m->modules = quo_dict_new();
 
   quo_ht_init(&m->types);
@@ -1754,10 +1745,40 @@ QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_p
   return m;
 }
 
+void quo_module_register_var(QuoModule *m, QuoStr *name, QuoVar value) { quo_ht_set(&m->globals, name, &value); }
+
 void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr fn) {
   QuoCFn *cfn = quo_cfunction_new(m, name, name_len, fn);
   QuoVar var = quo_var_new_obj(cfn);
-  quo_ht_set(&m->globals, cfn->name, &var);
+  quo_module_register_var(m, cfn->name, var);
+}
+
+QuoObj *quo_module_register_type(QuoModule *m, const char *name, int64_t name_len, size_t size) {
+  QuoObj *obj = quo_obj_new(size);
+  obj->type = QUO_OBJ_TYPE_USER;
+  obj->name = quo_str_new(m, name, name_len);
+  obj->dict = quo_dict_new();
+  QuoVar obj_var = quo_var_new_obj(obj);
+  quo_ht_set(&m->types, obj->name, &obj_var);
+  return obj;
+}
+
+QuoObj *quo_module_get_type_instance(QuoModule *m, const char *name, int64_t name_len) {
+  QuoVar var;
+  if (quo_ht_get(&m->types, quo_str_new(m, name, name_len), &var)) {
+    QuoObj *obj = quo_var_as_obj(&var);
+    QuoObj *instance = quo_obj_new(obj->size);
+    memcpy(instance, obj, obj->size);
+    return instance;
+  }
+  return NULL;
+}
+
+void quo_module_type_add(QuoObj *type, QuoStr *name, QuoVar value) { quo_dict_set(type->dict, name, &value); }
+
+void quo_module_type_add_cfn(QuoModule *m, QuoObj *type, const char *name, int64_t name_len, QuoCFunctionPtr fn) {
+  QuoCFn *cfn = quo_cfunction_new(m, name, name_len, fn);
+  quo_module_type_add(type, cfn->name, quo_var_new_obj(cfn));
 }
 
 QuoVar quo_module_run(QuoModule *m) {
@@ -1997,60 +2018,6 @@ int64_t quo_var_print(QuoVar *v) {
   }
   }
 }
-
-// ------------------------------ STATE ------------------------------ //
-
-// void quo_state_register_module(QuoModule *m, QuoModuleInitFn init_fn, QuoModuleCleanupFn cleanup_fn) {
-//   if (init_fn) init_fn(s);
-//   if (cleanup_fn) da_add(&s->modules_cleanup_fns, cleanup_fn);
-// }
-
-// QuoObj *quo_state_register_type(QuoModule *m, const char *name, int64_t name_len, size_t size) {
-//   QuoObj *obj = quo_obj_new(size);
-//   obj->type = QUO_OBJ_TYPE_USER;
-//   obj->name = quo_str_new(m, name, name_len);
-//   obj->dict = quo_dict_new();
-//   QuoVar obj_var = quo_var_new_obj(obj);
-//   quo_ht_set(&s->types, obj->name, &obj_var);
-//   return obj;
-// }
-
-// QuoObj *quo_state_get_type_instance(QuoModule *m, const char *name, int64_t name_len) {
-//   QuoVar var;
-//   if (quo_ht_get(&s->types, quo_str_new(m, name, name_len), &var)) {
-//     QuoObj *obj = quo_var_as_obj(&var);
-//     QuoObj *instance = quo_obj_new(obj->size);
-//     memcpy(instance, obj, obj->size);
-//     return instance;
-//   }
-//   return NULL;
-// }
-
-// void quo_state_type_add(QuoObj *type, QuoStr *name, QuoVar value) { quo_dict_set(type->dict, name, &value); }
-
-// void quo_state_type_add_cfn(QuoModule *m, QuoObj *type, const char *name, int64_t name_len, QuoCFunctionPtr fn) {
-//   QuoCFn *cfn = quo_cfunction_new(m, name, name_len, fn);
-//   quo_state_type_add(type, cfn->name, quo_var_new_obj(cfn));
-// }
-
-// QuoDict *quo_state_register_namespace(QuoModule *m, const char *name) {
-//   QuoDict *ns = quo_dict_new();
-//   QuoStr *ns_key = quo_str_new(m, name, -1);
-//   QuoVar ns_value = quo_var_new_obj(ns);
-//   quo_ht_set(&s->globals, ns_key, &ns_value);
-//   return ns;
-// }
-
-// bool quo_state_namespace_add(QuoModule *m, QuoDict *ns, QuoStr *name, QuoVar value) {
-//   quo_dict_set(ns, name, &value);
-//   return true;
-// }
-
-// void quo_state_namespace_add_cfn(QuoModule *m, QuoDict *ns, const char *fn_name, QuoCFunctionPtr fn) {
-//   QuoCFn *cfn = quo_cfunction_new(m, fn_name, -1, fn);
-//   QuoVar var = quo_var_new_obj(cfn);
-//   quo_state_namespace_add(s, ns, cfn->name, var);
-// }
 
 // ------------------------------ PARSER ------------------------------ //
 

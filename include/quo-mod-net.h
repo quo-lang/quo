@@ -4,14 +4,9 @@ DESCRIPTION:
     Quo module for HTTP/networking using libcurl.
     It will load libcurl dynamically using the system's dynamic linker.
 
-C API:
-    #include "quo-mod-net.h"
-    ...
-    QuoState *s = quo_new_state();
-    quo_state_register_module(s, quo_mod_net_init, quo_mod_net_cleanup);
-    ...
-
 QUO API:
+    var net = import("net")
+
     # GET request
     var response = net.get("https://api.example.com/data")
 
@@ -147,7 +142,7 @@ static size_t quo__mod_net_write_callback(void *contents, size_t size, size_t nm
 }
 
 // Helper to perform HTTP request
-static QuoVar quo__mod_net_perform_request(QuoState *s, const char *url, const char *method, const char *data, QuoDict *headers_dict) {
+static QuoVar quo__mod_net_perform_request(QuoModule *m, const char *url, const char *method, const char *data, QuoDict *headers_dict) {
   if (!quo__curl.handle) return quo_var_new_err("libcurl not loaded");
   void *curl = quo__curl.easy_init();
   if (!curl) return quo_var_new_err("Failed to initialize curl");
@@ -188,113 +183,109 @@ static QuoVar quo__mod_net_perform_request(QuoState *s, const char *url, const c
     return quo_var_new_err(error ? error : "Unknown curl error");
   }
   quo_sb_null_terminate(&response);
-  QuoStr *result = quo_str_new_raw(s, quo_sb_string(&response), response.count);
+  QuoStr *result = quo_str_new_raw(m, quo_sb_string(&response), response.count);
   quo_sb_free(&response);
   return quo_var_new_obj(result);
 }
 
 // ---------- PRIVATE API ---------- //
 
-static inline QuoVar quo__mod_net_get(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc < 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.get() requires a URL string");
-  return quo__mod_net_perform_request(s, quo_var_as_str(&argv[1])->data, "GET", NULL, NULL);
+static inline QuoVar quo__mod_net_get(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.get() requires a URL string");
+  return quo__mod_net_perform_request(m, quo_var_as_str(&argv[0])->data, "GET", NULL, NULL);
 }
 
-static inline QuoVar quo__mod_net_post(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc < 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.post() requires a URL string");
+static inline QuoVar quo__mod_net_post(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.post() requires a URL string");
   const char *data = NULL;
-  if (argc >= 3 && quo_var_is_str(&argv[2])) data = quo_var_as_str(&argv[2])->data;
-  return quo__mod_net_perform_request(s, quo_var_as_str(&argv[1])->data, "POST", data, NULL);
+  if (argc >= 2 && quo_var_is_str(&argv[1])) data = quo_var_as_str(&argv[1])->data;
+  return quo__mod_net_perform_request(m, quo_var_as_str(&argv[0])->data, "POST", data, NULL);
 }
 
-static inline QuoVar quo__mod_net_put(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc < 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.put() requires a URL string");
+static inline QuoVar quo__mod_net_put(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.put() requires a URL string");
   const char *data = NULL;
-  if (argc >= 3 && quo_var_is_str(&argv[2])) data = quo_var_as_str(&argv[2])->data;
-  return quo__mod_net_perform_request(s, quo_var_as_str(&argv[1])->data, "PUT", data, NULL);
+  if (argc >= 2 && quo_var_is_str(&argv[1])) data = quo_var_as_str(&argv[1])->data;
+  return quo__mod_net_perform_request(m, quo_var_as_str(&argv[0])->data, "PUT", data, NULL);
 }
 
-static inline QuoVar quo__mod_net_patch(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc < 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.patch() requires a URL string");
+static inline QuoVar quo__mod_net_patch(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.patch() requires a URL string");
   const char *data = NULL;
-  if (argc >= 3 && quo_var_is_str(&argv[2])) data = quo_var_as_str(&argv[2])->data;
-  return quo__mod_net_perform_request(s, quo_var_as_str(&argv[1])->data, "PATCH", data, NULL);
+  if (argc >= 2 && quo_var_is_str(&argv[1])) data = quo_var_as_str(&argv[1])->data;
+  return quo__mod_net_perform_request(m, quo_var_as_str(&argv[0])->data, "PATCH", data, NULL);
 }
 
-static inline QuoVar quo__mod_net_delete(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc < 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.delete() requires a URL string");
-  return quo__mod_net_perform_request(s, quo_var_as_str(&argv[1])->data, "DELETE", NULL, NULL);
+static inline QuoVar quo__mod_net_delete(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.delete() requires a URL string");
+  return quo__mod_net_perform_request(m, quo_var_as_str(&argv[0])->data, "DELETE", NULL, NULL);
 }
 
-static inline QuoVar quo__mod_net_request(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc < 3 || !quo_var_is_str(&argv[1]) || !quo_var_is_str(&argv[2]))
+static inline QuoVar quo__mod_net_request(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc < 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
     return quo_var_new_err("net.request() requires URL and method strings");
-  const char *url = quo_var_as_str(&argv[1])->data;
-  const char *method = quo_var_as_str(&argv[2])->data;
+  const char *url = quo_var_as_str(&argv[0])->data;
+  const char *method = quo_var_as_str(&argv[1])->data;
   // Optional body
   const char *data = NULL;
-  if (argc >= 4 && quo_var_is_str(&argv[3])) data = quo_var_as_str(&argv[3])->data;
+  if (argc >= 3 && quo_var_is_str(&argv[2])) data = quo_var_as_str(&argv[2])->data;
   // Optional headers
   QuoDict *headers = NULL;
-  if (argc >= 5 && quo_var_is_dict(&argv[4])) headers = quo_var_as_dict(&argv[4]);
-  return quo__mod_net_perform_request(s, url, method, data, headers);
+  if (argc >= 4 && quo_var_is_dict(&argv[3])) headers = quo_var_as_dict(&argv[3]);
+  return quo__mod_net_perform_request(m, url, method, data, headers);
 }
 
-static inline QuoVar quo__mod_net_encode(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.url_encode() requires a string argument");
+static inline QuoVar quo__mod_net_encode(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.url_encode() requires a string argument");
   if (!quo__curl.handle) return quo_var_new_err("libcurl not loaded");
   void *curl = quo__curl.easy_init();
   if (!curl) return quo_var_new_err("Failed to initialize curl");
-  char *encoded = quo__curl.easy_escape(curl, quo_var_as_str(&argv[1])->data, quo_var_as_str(&argv[1])->len);
+  char *encoded = quo__curl.easy_escape(curl, quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[0])->len);
   quo__curl.easy_cleanup(curl);
   if (!encoded) return quo_var_new_err("URL encoding failed");
-  QuoStr *result = quo_str_new(s, encoded, -1);
+  QuoStr *result = quo_str_new(m, encoded, -1);
   free(encoded); // curl_easy_escape returns malloc'd memory
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_net_decode(QuoState *s, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("net.url_decode() requires a string argument");
+static inline QuoVar quo__mod_net_decode(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.url_decode() requires a string argument");
   if (!quo__curl.handle) return quo_var_new_err("libcurl not loaded");
   void *curl = quo__curl.easy_init();
   if (!curl) return quo_var_new_err("Failed to initialize curl");
   int out_len;
-  char *decoded = quo__curl.easy_unescape(curl, quo_var_as_str(&argv[1])->data, quo_var_as_str(&argv[1])->len, &out_len);
+  char *decoded = quo__curl.easy_unescape(curl, quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[0])->len, &out_len);
   quo__curl.easy_cleanup(curl);
   if (!decoded) return quo_var_new_err("URL decoding failed");
-  QuoStr *result = quo_str_new(s, decoded, out_len);
+  QuoStr *result = quo_str_new(m, decoded, out_len);
   free(decoded); // curl_easy_unescape returns malloc'd memory
   return quo_var_new_obj(result);
+}
+
+// Cleanup - unload libcurl
+static inline void quo__mod_net_cleanup(QuoModule *m) {
+  if (quo__curl.handle) {
+    dlclose(quo__curl.handle);
+    quo__curl.handle = NULL;
+  }
 }
 
 // ---------- PUBLIC API ---------- //
 
 // Register the net namespace. Returns false if libcurl is not available.
-static inline bool quo_mod_net_init(QuoState *s) {
+static inline void quo_mod_net_init(QuoModule *parent) {
   if (!quo__mod_net_load()) {
-    fprintf(stderr, "Error: quo-mod-net: libcurl not found, 'net' namespace not available\n");
-    return false;
+    fprintf(stderr, "Error: quo-mod-net: libcurl not found, 'net' module not available\n");
+    return;
   }
-
-  QuoDict *dl_ns = quo_state_register_namespace(s, "net");
-  quo_state_namespace_add_cfn(s, dl_ns, "request", quo__mod_net_request);
-  quo_state_namespace_add_cfn(s, dl_ns, "get", quo__mod_net_get);
-  quo_state_namespace_add_cfn(s, dl_ns, "post", quo__mod_net_post);
-  quo_state_namespace_add_cfn(s, dl_ns, "put", quo__mod_net_put);
-  quo_state_namespace_add_cfn(s, dl_ns, "patch", quo__mod_net_patch);
-  quo_state_namespace_add_cfn(s, dl_ns, "delete", quo__mod_net_delete);
-  quo_state_namespace_add_cfn(s, dl_ns, "encode", quo__mod_net_encode);
-  quo_state_namespace_add_cfn(s, dl_ns, "decode", quo__mod_net_decode);
-
-  return true;
-}
-
-// Cleanup - unload libcurl
-static inline void quo_mod_net_cleanup(QuoState *s) {
-  if (quo__curl.handle) {
-    dlclose(quo__curl.handle);
-    quo__curl.handle = NULL;
-  }
+  QuoModule *m = quo_module_new(parent, parent->cwd, "net", NULL, quo__mod_net_cleanup);
+  quo_module_register_cfn(m, "get", -1, quo__mod_net_get);
+  quo_module_register_cfn(m, "post", -1, quo__mod_net_post);
+  quo_module_register_cfn(m, "put", -1, quo__mod_net_put);
+  quo_module_register_cfn(m, "patch", -1, quo__mod_net_patch);
+  quo_module_register_cfn(m, "delete", -1, quo__mod_net_delete);
+  quo_module_register_cfn(m, "encode", -1, quo__mod_net_encode);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_net_decode);
 }
 
 #ifdef __cplusplus

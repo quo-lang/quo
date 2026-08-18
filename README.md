@@ -509,7 +509,7 @@ It is very simple to embed Quo in your own code.
   // Get the directory name of the .quo script. It will be used as the current working directory.
   char *cwd = quo_dirname(path);
   // Create a Quo state with the script current working directory.
-  QuoState *s = quo_state_new(cwd);
+  QuoModule *m = quo_state_new(cwd);
 
   // Load modules
   quo_state_register_module(s, quo_mod_base64_init, NULL);
