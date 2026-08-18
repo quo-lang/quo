@@ -28,7 +28,7 @@ extern "C" {
 // ---------- PRIVATE API ---------- //
 
 // Sleep for N seconds
-static QuoVar quo__mod_time_sleep(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_time_sleep(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("time.sleep() takes number of seconds");
   int64_t sec = (int64_t)argv[0].val_num;
   if (sec < 0) sec = 0;
@@ -41,13 +41,13 @@ static QuoVar quo__mod_time_sleep(QuoModule *m, int64_t argc, QuoVar *argv) {
 }
 
 // Get current time in seconds since epoch
-static QuoVar quo__mod_time_now(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_time_now(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 0) return quo_var_new_err("time.now() takes no arguments");
   return quo_var_new_num((double)time(NULL));
 }
 
 // Get clock for benchmarking
-static QuoVar quo__mod_time_clock(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_time_clock(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 0) return quo_var_new_err("time.clock() takes no arguments");
   return quo_var_new_num((double)clock() / CLOCKS_PER_SEC);
 }

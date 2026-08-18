@@ -157,128 +157,128 @@ static inline double quo__mod_math_as_double(QuoVar *v) { return quo_var_is_num(
 
 // ---------- PRIVATE API ---------- //
 
-static QuoVar quo__mod_math_floor(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_floor(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("floor() requires a number");
   return quo_var_new_num((int64_t)quo__math.floor(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_ceil(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_ceil(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("ceil() requires a number");
   return quo_var_new_num((int64_t)quo__math.ceil(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_round(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_round(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("round() requires a number");
   return quo_var_new_num((int64_t)quo__math.round(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_trunc(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_trunc(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("trunc() requires a number");
   return quo_var_new_num((int64_t)quo__math.trunc(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_abs(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_abs(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("abs() requires a number");
   if (quo_var_is_num(&argv[0])) return quo_var_new_num(llabs((int64_t)argv[0].val_num));
   return quo_var_new_num(quo__math.fabs(argv[0].val_num));
 }
 
-static QuoVar quo__mod_math_sqrt(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_sqrt(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("sqrt() requires a number");
   return quo_var_new_num(quo__math.sqrt(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_cbrt(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_cbrt(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("cbrt() requires a number");
   return quo_var_new_num(quo__math.cbrt(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_pow(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_pow(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("pow() requires two numbers");
   return quo_var_new_num(quo__math.pow(quo__mod_math_as_double(&argv[0]), quo__mod_math_as_double(&argv[1])));
 }
 
-static QuoVar quo__mod_math_exp(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_exp(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("exp() requires a number");
   return quo_var_new_num(quo__math.exp(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_log(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_log(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("log() requires a number");
   double val = quo__mod_math_as_double(&argv[0]);
   if (val <= 0) return quo_var_new_err("log() argument must be positive");
   return quo_var_new_num(quo__math.log(val));
 }
 
-static QuoVar quo__mod_math_log2(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_log2(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("log2() requires a number");
   double val = quo__mod_math_as_double(&argv[0]);
   if (val <= 0) return quo_var_new_err("log2() argument must be positive");
   return quo_var_new_num(quo__math.log2(val));
 }
 
-static QuoVar quo__mod_math_log10(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_log10(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("log10() requires a number");
   double val = quo__mod_math_as_double(&argv[0]);
   if (val <= 0) return quo_var_new_err("log10() argument must be positive");
   return quo_var_new_num(quo__math.log10(val));
 }
 
-static QuoVar quo__mod_math_sin(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_sin(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("sin() requires a number");
   return quo_var_new_num(quo__math.sin(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_cos(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_cos(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("cos() requires a number");
   return quo_var_new_num(quo__math.cos(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_tan(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_tan(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("tan() requires a number");
   return quo_var_new_num(quo__math.tan(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_asin(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_asin(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("asin() requires a number");
   double val = quo__mod_math_as_double(&argv[0]);
   if (val < -1 || val > 1) return quo_var_new_err("asin() argument must be between -1 and 1");
   return quo_var_new_num(quo__math.asin(val));
 }
 
-static QuoVar quo__mod_math_acos(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_acos(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("acos() requires a number");
   double val = quo__mod_math_as_double(&argv[0]);
   if (val < -1 || val > 1) return quo_var_new_err("acos() argument must be between -1 and 1");
   return quo_var_new_num(quo__math.acos(val));
 }
 
-static QuoVar quo__mod_math_atan(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_atan(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("atan() requires a number");
   return quo_var_new_num(quo__math.atan(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_atan2(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_atan2(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("atan2() requires two numbers");
   return quo_var_new_num(quo__math.atan2(quo__mod_math_as_double(&argv[0]), quo__mod_math_as_double(&argv[1])));
 }
 
-static QuoVar quo__mod_math_sinh(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_sinh(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("sinh() requires a number");
   return quo_var_new_num(quo__math.sinh(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_cosh(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_cosh(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("cosh() requires a number");
   return quo_var_new_num(quo__math.cosh(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_tanh(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_tanh(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("tanh() requires a number");
   return quo_var_new_num(quo__math.tanh(quo__mod_math_as_double(&argv[0])));
 }
 
-static QuoVar quo__mod_math_min(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_min(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("min() requires two numbers");
   if (quo_var_is_num(&argv[0]) && quo_var_is_num(&argv[1]))
     return quo_var_new_num(argv[0].val_num < argv[1].val_num ? argv[0].val_num : argv[1].val_num);
@@ -286,7 +286,7 @@ static QuoVar quo__mod_math_min(QuoModule *m, int64_t argc, QuoVar *argv) {
   return quo_var_new_num(a < b ? a : b);
 }
 
-static QuoVar quo__mod_math_max(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_max(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("max() requires two numbers");
   if (quo_var_is_num(&argv[0]) && quo_var_is_num(&argv[1]))
     return quo_var_new_num(argv[0].val_num > argv[1].val_num ? argv[0].val_num : argv[1].val_num);
@@ -294,7 +294,7 @@ static QuoVar quo__mod_math_max(QuoModule *m, int64_t argc, QuoVar *argv) {
   return quo_var_new_num(a > b ? a : b);
 }
 
-static QuoVar quo__mod_math_clamp(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_clamp(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 3 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1]) || !quo_var_is_num(&argv[2]))
     return quo_var_new_err("clamp() requires three numbers");
   double val = quo__mod_math_as_double(&argv[0]);
@@ -305,19 +305,19 @@ static QuoVar quo__mod_math_clamp(QuoModule *m, int64_t argc, QuoVar *argv) {
   return quo_var_new_num(val);
 }
 
-static QuoVar quo__mod_math_random_float(QuoModule *m, int64_t argc, QuoVar *argv) { return quo_var_new_num((double)rand() / RAND_MAX); }
+static QuoVar quo__mod_math_random_float(QuoModule *m, int argc, QuoVar *argv) { return quo_var_new_num((double)rand() / RAND_MAX); }
 
-static QuoVar quo__mod_math_random(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_random(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("random() requires an integer max");
   return quo_var_new_num(rand() % (int64_t)argv[0].val_num);
 }
 
-static QuoVar quo__mod_math_deg_to_rad(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_deg_to_rad(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("deg_to_rad() requires a number");
   return quo_var_new_num(quo__mod_math_as_double(&argv[0]) * M_PI / 180.0);
 }
 
-static QuoVar quo__mod_math_rad_to_deg(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_math_rad_to_deg(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("rad_to_deg() requires a number");
   return quo_var_new_num(quo__mod_math_as_double(&argv[0]) * 180.0 / M_PI);
 }

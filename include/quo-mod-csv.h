@@ -146,7 +146,7 @@ static QuoVar quo__csv_escape_field(QuoModule *m, QuoVar *value) {
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_csv_parse(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_csv_parse(QuoModule *m, int argc, QuoVar *argv) {
   if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("csv.parse() requires a string argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
@@ -172,7 +172,7 @@ static inline QuoVar quo__mod_csv_parse(QuoModule *m, int64_t argc, QuoVar *argv
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int argc, QuoVar *argv) {
   if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("csv.parse_dict() requires a string argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
@@ -209,7 +209,7 @@ static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int64_t argc, QuoVar 
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_csv_stringify(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_csv_stringify(QuoModule *m, int argc, QuoVar *argv) {
   if (argc < 1 || !quo_var_is_arr(&argv[0])) return quo_var_new_err("csv.stringify() requires an array argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
@@ -234,7 +234,7 @@ static inline QuoVar quo__mod_csv_stringify(QuoModule *m, int64_t argc, QuoVar *
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int argc, QuoVar *argv) {
   if (argc < 1 || !quo_var_is_arr(&argv[0])) return quo_var_new_err("csv.stringify_dict() requires an array of dicts argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];

@@ -25,12 +25,12 @@ extern "C" {
 // ---------- PRIVATE API ---------- //
 
 // Run a system command and return the result
-static QuoVar quo__mod_os_system(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_os_system(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1) return quo_var_new_err("os.system() takes command string");
   return quo_var_new_num(system(quo_var_as_str(&argv[0])->data));
 }
 
-static QuoVar quo__mod_os_name(QuoModule *m, int64_t argc, QuoVar *argv) {
+static QuoVar quo__mod_os_name(QuoModule *m, int argc, QuoVar *argv) {
   const char *os_name = NULL;
 #if defined(__linux__)
   os_name = "linux";

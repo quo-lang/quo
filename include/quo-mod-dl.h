@@ -36,7 +36,7 @@ QUO_DEFINE_USER_TYPE(QuoDLSym, sym)
 
 // ---------- PRIVATE API ---------- //
 
-static inline QuoVar quo__mod_dl_open(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_dl_open(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("dl.open() takes library path string");
   QuoStr *name = quo_var_as_str(&argv[0]);
   void *handle = dlopen(name->data, RTLD_LAZY);
@@ -46,7 +46,7 @@ static inline QuoVar quo__mod_dl_open(QuoModule *m, int64_t argc, QuoVar *argv) 
   return quo_var_new_obj(dl);
 }
 
-static inline QuoVar quo__mod_dl_sym(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("sym() takes symbol name string");
   QuoDLHandle *dl = (QuoDLHandle *)quo_var_as_obj(&argv[0]);
   QuoStr *name = quo_var_as_str(&argv[0]);
@@ -57,7 +57,7 @@ static inline QuoVar quo__mod_dl_sym(QuoModule *m, int64_t argc, QuoVar *argv) {
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_dl_call(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("call() takes function name string");
   QuoDLHandle *dl = (QuoDLHandle *)quo_var_as_obj(&argv[0]);
   QuoStr *name = quo_var_as_str(&argv[0]);
@@ -71,7 +71,7 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int64_t argc, QuoVar *argv) 
   return quo_var_new_num(result);
 }
 
-static inline QuoVar quo__mod_dl_close(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_dl_close(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_obj(&argv[0])) return quo_var_new_err("close() takes dl handle");
   QuoDLHandle *dl = (QuoDLHandle *)quo_var_as_obj(&argv[0]);
   if (dlclose(dl->handle) != 0) return quo_var_new_err(dlerror());

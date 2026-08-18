@@ -297,7 +297,7 @@ static void quo__json_stringify_value(QuoStringBuilder *sb, QuoVar *v) {
 
 // ---------- PRIVATE API ---------- //
 
-static inline QuoVar quo__mod_json_decode(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_json_decode(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("json.decode() requires a string argument");
   quo__json_parser parser;
   parser.m = m;
@@ -308,7 +308,7 @@ static inline QuoVar quo__mod_json_decode(QuoModule *m, int64_t argc, QuoVar *ar
   return result;
 }
 
-static inline QuoVar quo__mod_json_encode(QuoModule *m, int64_t argc, QuoVar *argv) {
+static inline QuoVar quo__mod_json_encode(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1) return quo_var_new_err("json.encode() requires one argument");
   QuoStringBuilder sb = quo_sb_new();
   quo__json_stringify_value(&sb, &argv[0]);
