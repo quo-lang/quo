@@ -58,6 +58,7 @@ static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("call() takes function name string");
   QuoDLHandle *dl = (QuoDLHandle *)quo_var_as_obj(&argv[0]);
   QuoStr *name = quo_var_as_str(&argv[0]);
@@ -72,6 +73,7 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_dl_close(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_obj(&argv[0])) return quo_var_new_err("close() takes dl handle");
   QuoDLHandle *dl = (QuoDLHandle *)quo_var_as_obj(&argv[0]);
   if (dlclose(dl->handle) != 0) return quo_var_new_err(dlerror());

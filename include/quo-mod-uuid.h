@@ -107,6 +107,8 @@ static const char *quo__uuid_variant(unsigned char *bytes) {
 // ---------- PRIVATE API ---------- //
 
 static inline QuoVar quo__mod_uuid_v4(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
   unsigned char bytes[16];
   quo__uuid_random_bytes(bytes, 16);
   bytes[6] = (bytes[6] & 0x0F) | 0x40;
@@ -117,6 +119,8 @@ static inline QuoVar quo__mod_uuid_v4(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_uuid_v7(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
   unsigned char bytes[16];
   uint64_t timestamp = quo__uuid_timestamp_ms();
   bytes[0] = (timestamp >> 40) & 0xFF;
@@ -157,6 +161,7 @@ static inline QuoVar quo__mod_uuid_parse(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_uuid_is_valid(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_bool(false);
   unsigned char bytes[16];
   return quo_var_new_bool(quo__uuid_parse_bytes(quo_var_as_str(&argv[0])->data, bytes));

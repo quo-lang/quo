@@ -26,11 +26,15 @@ extern "C" {
 
 // Run a system command and return the result
 static QuoVar quo__mod_os_system(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("os.system() takes command string");
   return quo_var_new_num(system(quo_var_as_str(&argv[0])->data));
 }
 
 static QuoVar quo__mod_os_name(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
   const char *os_name = NULL;
 #if defined(__linux__)
   os_name = "linux";

@@ -264,6 +264,7 @@ static inline QuoVar quo__mod_net_decode(QuoModule *m, int argc, QuoVar *argv) {
 
 // Cleanup - unload libcurl
 static inline void quo__mod_net_cleanup(QuoModule *m) {
+  QUO_UNUSED(m);
   if (quo__curl.handle) {
     dlclose(quo__curl.handle);
     quo__curl.handle = NULL;

@@ -25,6 +25,12 @@
 #endif
 
 // ------------------------------------------------------------------------------------------ //
+//                                           MACROS                                           //
+// ------------------------------------------------------------------------------------------ //
+
+#define QUO_UNUSED(x) ((void)(x))
+
+// ------------------------------------------------------------------------------------------ //
 //                                         DEFINITIONS                                        //
 // ------------------------------------------------------------------------------------------ //
 
@@ -461,7 +467,7 @@ QuoVar quo_var_mul(QuoModule *m, QuoVar *a, QuoVar *b);
 QuoVar quo_var_sub(QuoVar *a, QuoVar *b);
 QuoVar quo_var_div(QuoVar *a, QuoVar *b);
 
-bool quo_var_eq(QuoModule *m, QuoVar *a, QuoVar *b);
+bool quo_var_eq(QuoVar *a, QuoVar *b);
 int quo_var_cmp(QuoVar *a, QuoVar *b);
 QuoVar quo_var_neg(QuoVar *v);
 QuoVar quo_var_not(QuoVar *v);
@@ -554,7 +560,7 @@ void quo_vm_free(QuoVM *vm);
 
 // --- UTILS --- //
 
-#define quo__static_array_size(arr) (sizeof(arr) / sizeof(arr[0]))
+#define quo__static_array_size(arr) ((int)(sizeof(arr) / sizeof(arr[0])))
 
 int quo_hash(const char *str, int len);
 // Returns true if the string ends with the given suffix.
@@ -915,7 +921,7 @@ static QuoToken quo__lexer_next_token(QuoModule *m) {
       t.len = m->pos - start;
       // Find keywords
       for (int i = 0; i < quo__static_array_size(quo__keywords); ++i) {
-        size_t len = strlen(quo_token_type_str(quo__keywords[i]));
+        int len = (int)strlen(quo_token_type_str(quo__keywords[i]));
         if (len == t.len && memcmp(t.start, quo_token_type_str(quo__keywords[i]), len) == 0) {
           t.type = quo__keywords[i];
           break;
@@ -1151,9 +1157,9 @@ void quo_obj_unref(QuoObj *obj) {
 
 // --- STRING FUNCTIONS --- //
 
-static inline QuoStr *quo__find_string(QuoHashTable *table, const char *chars, int length, unsigned int hash) {
+static inline QuoStr *quo__find_string(QuoHashTable *table, const char *chars, int length, int hash) {
   if (table->count == 0) return NULL;
-  unsigned int index = hash & (table->capacity - 1);
+  int index = hash & (table->capacity - 1);
   while (true) {
     QuoHashTableEntry *entry = &table->items[index];
     if (entry->key == NULL) {
@@ -1169,8 +1175,8 @@ QuoStr *quo_str_new(QuoModule *m, const char *str, int len) {
   if (len < 0) len = strlen(str);
   // Process escape sequences
   char *processed = quo_alloc(NULL, len + 1);
-  unsigned int out_len = 0;
-  for (unsigned int i = 0; i < len; i++) {
+  int out_len = 0;
+  for (int i = 0; i < len; i++) {
     if (str[i] == '\\' && i + 1 < len) {
       i++;
       switch (str[i]) {
@@ -1407,6 +1413,7 @@ static QuoVar quo__builtin_type(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Print the values of the given arguments. Separate values with spaces and print a newline at the end.
 static QuoVar quo__builtin_print(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   for (int i = 0; i < argc; i++) {
     quo_var_print(&argv[i]);
     if (i < argc - 1) printf(" ");
@@ -1435,15 +1442,31 @@ static QuoVar quo__builtin_input(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Exit the program with an optional exit code
 static QuoVar quo__builtin_exit(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   int code = 0;
   if (argc > 0 && quo_var_is_num(&argv[0])) code = (int)argv[1].val_num;
   exit(code);
   return quo_var_new_nil();
 }
-static QuoVar quo__builtin_bool(QuoModule *m, int argc, QuoVar *argv) { return quo_var_to_bool(&argv[0]); }
-static QuoVar quo__builtin_num(QuoModule *m, int argc, QuoVar *argv) { return quo_var_to_num(&argv[0]); }
-static QuoVar quo__builtin_str(QuoModule *m, int argc, QuoVar *argv) { return quo_var_to_str(m, &argv[0]); }
-static QuoVar quo__builtin_len(QuoModule *m, int argc, QuoVar *argv) { return quo_var_new_num(quo_var_len(&argv[0])); }
+static QuoVar quo__builtin_bool(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  return quo_var_to_bool(&argv[0]);
+}
+static QuoVar quo__builtin_num(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  return quo_var_to_num(&argv[0]);
+}
+static QuoVar quo__builtin_str(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(argc);
+  return quo_var_to_str(m, &argv[0]);
+}
+static QuoVar quo__builtin_len(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  return quo_var_new_num(quo_var_len(&argv[0]));
+}
 
 // - STRING METHODS - //
 
@@ -1475,6 +1498,7 @@ static QuoVar quo__str_method_strip(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Check if string starts with prefix
 static QuoVar quo__str_method_startswith(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("startswith() requires a string argument");
   QuoStr *str = quo_var_as_str(&argv[0]);
   QuoStr *prefix = quo_var_as_str(&argv[1]);
@@ -1483,6 +1507,7 @@ static QuoVar quo__str_method_startswith(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Check if string ends with suffix
 static QuoVar quo__str_method_endswith(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("endswith() requires a string argument");
   QuoStr *str = quo_var_as_str(&argv[0]);
   QuoStr *suffix = quo_var_as_str(&argv[1]);
@@ -1491,6 +1516,7 @@ static QuoVar quo__str_method_endswith(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Check if string contains substring
 static QuoVar quo__str_method_contains(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("contains() requires a string argument");
   QuoStr *str = quo_var_as_str(&argv[0]);
   QuoStr *substr = quo_var_as_str(&argv[1]);
@@ -1550,22 +1576,26 @@ static QuoVar quo__str_method_replace(QuoModule *m, int argc, QuoVar *argv) {
 // - ARRAY METHODS - //
 
 static QuoVar quo__arr_method_get(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2) return quo_var_new_err("get() requires index argument");
   if (!quo_var_is_num(&argv[1])) return quo_var_new_err("Index must be a number");
   return quo_arr_get(quo_obj_as_arr(argv[0].val_obj), (int)argv[1].val_num);
 }
 static QuoVar quo__arr_method_set(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 3) return quo_var_new_err("set() requires index and value arguments");
   if (!quo_var_is_num(&argv[1])) return quo_var_new_err("Index must be a number");
   quo_arr_set(quo_obj_as_arr(argv[0].val_obj), (int)argv[1].val_num, argv[2]);
   return argv[0];
 }
 static QuoVar quo__arr_method_push(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2) return quo_var_new_err("push() requires value argument");
   quo_arr_push(quo_obj_as_arr(argv[0].val_obj), argv[1]);
   return argv[0];
 }
 static QuoVar quo__arr_method_pop(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("pop() requires no arguments");
   if (quo_arr_len(quo_obj_as_arr(argv[0].val_obj)) == 0) return quo_var_new_nil();
   return quo_arr_pop(quo_obj_as_arr(argv[0].val_obj));
@@ -1574,26 +1604,31 @@ static QuoVar quo__arr_method_pop(QuoModule *m, int argc, QuoVar *argv) {
 // - DICTIONARY METHODS - //
 
 static QuoVar quo__dict_method_get(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2) return quo_var_new_err("get() requires key argument");
   if (!quo_var_is_str(&argv[1])) return quo_var_new_err("Key must be a string");
   return quo_dict_get(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]));
 }
 static QuoVar quo__dict_method_set(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 3) return quo_var_new_err("set() requires key and value arguments");
   if (!quo_var_is_str(&argv[1])) return quo_var_new_err("Key must be a string");
   quo_dict_set(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]), &argv[2]);
   return quo_var_new_nil();
 }
 static QuoVar quo__dict_method_has(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 && !quo_var_is_str(&argv[1])) return quo_var_new_err("has() requires key string argument");
   return quo_var_new_bool(quo_dict_has(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1])));
 }
 static QuoVar quo__dict_method_del(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 && !quo_var_is_str(&argv[1])) return quo_var_new_err("del() requires key string argument");
   quo_dict_del(quo_var_as_dict(&argv[0]), quo_var_as_str(&argv[1]));
   return quo_var_new_nil();
 }
 static QuoVar quo__dict_method_keys(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("keys() requires no arguments");
   QuoArr *keys = quo_arr_new();
   QuoDict *dict = quo_var_as_dict(&argv[0]);
@@ -1604,6 +1639,7 @@ static QuoVar quo__dict_method_keys(QuoModule *m, int argc, QuoVar *argv) {
   return quo_var_new_obj(keys);
 }
 static QuoVar quo__dict_method_values(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("values() requires no arguments");
   QuoArr *values = quo_arr_new();
   QuoDict *dict = quo_var_as_dict(&argv[0]);
@@ -1914,10 +1950,14 @@ QuoVar quo_var_not(QuoVar *a) {
   return quo_var_new_err("Type don't support logical negation");
 }
 
-bool quo_var_eq(QuoModule *m, QuoVar *a, QuoVar *b) {
+bool quo_var_eq(QuoVar *a, QuoVar *b) {
   if (quo_var_is_num(a) && quo_var_is_num(b)) return a->val_num == b->val_num;
   if (quo_var_is_str(a) || quo_var_is_str(b)) {
-    if (quo_var_is_str(a) && quo_var_is_str(b)) return a->val_obj == b->val_obj;
+    if (quo_var_is_str(a) && quo_var_is_str(b)) {
+      QuoStr *str_a = quo_var_as_str(a);
+      QuoStr *str_b = quo_var_as_str(b);
+      return str_a == str_b || str_a->hash == str_b->hash || (str_a->len == str_b->len && strcmp(str_a->data, str_b->data) == 0);
+    }
     return quo_var_to_bool(a).val_num == quo_var_to_bool(b).val_num;
   }
   if ((quo_var_is_bool(a) || quo_var_is_bool(b)) || (quo_var_is_nil(a) || quo_var_is_nil(b)))
@@ -1925,6 +1965,9 @@ bool quo_var_eq(QuoModule *m, QuoVar *a, QuoVar *b) {
   if (a->type != b->type) return false;
   switch (a->type) {
   case QUO_VAR_TYPE_ERROR: return a->val_err == b->val_err;
+  case QUO_VAR_TYPE_NIL:
+  case QUO_VAR_TYPE_BOOL:
+  case QUO_VAR_TYPE_NUM: break;
   case QUO_VAR_TYPE_OBJ:
     switch (a->val_obj->type) {
     case QUO_OBJ_TYPE_CFN: return quo_obj_as_cfn(a->val_obj)->name == quo_obj_as_cfn(b->val_obj)->name;
@@ -1933,10 +1976,10 @@ bool quo_var_eq(QuoModule *m, QuoVar *a, QuoVar *b) {
     case QUO_OBJ_TYPE_STR:
     case QUO_OBJ_TYPE_ARR:
     case QUO_OBJ_TYPE_USER:
-    case QUO_OBJ_TYPE_DICT: break;
+    case QUO_OBJ_TYPE_DICT: return false;
     }
-  default: return false;
   }
+  return false;
 }
 
 int quo_var_cmp(QuoVar *a, QuoVar *b) {
@@ -3220,13 +3263,13 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       break;
     }
     case QUO_OP_EQ: {
-      bool res = quo_var_eq(vm->m, quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
+      bool res = quo_var_eq(quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, quo_var_new_bool(res));
       break;
     }
     case QUO_OP_NEQ: {
-      bool res = !quo_var_eq(vm->m, quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
+      bool res = !quo_var_eq(quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, quo_var_new_bool(res));
       break;

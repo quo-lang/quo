@@ -91,6 +91,7 @@ QUO_DEFINE_USER_TYPE(QuoFSFile, fs_file);
 // ---------- PRIVATE API ---------- //
 
 static inline QuoVar quo__mod_fs_exists(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.exists() requires a path string");
   FILE *f = fopen(quo_var_as_str(&argv[0])->data, "rb");
   if (f) {
@@ -185,6 +186,7 @@ static inline QuoVar quo__mod_fs_ls(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_mkdir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.mkdir_all() requires a path string");
   char *path = quo_strdup(quo_var_as_str(&argv[0])->data);
   char *p = path;
@@ -208,6 +210,7 @@ static inline QuoVar quo__mod_fs_mkdir(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_rm(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.rm() requires a path string");
   if (remove(quo_var_as_str(&argv[0])->data) != 0) return quo_var_new_err("Failed to remove file");
   return quo_var_new_nil();
@@ -247,12 +250,14 @@ static bool quo__fs_remove_recursive(const char *path) {
 }
 
 static inline QuoVar quo__mod_fs_rmdir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.rm_all() requires a path string");
   if (!quo__fs_remove_recursive(quo_var_as_str(&argv[0])->data)) return quo_var_new_err("Failed to remove directory recursively");
   return quo_var_new_nil();
 }
 
 static inline QuoVar quo__mod_fs_rename(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
     return quo_var_new_err("fs.rename() requires source and destination path strings");
   if (rename(quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[1])->data) != 0) return quo_var_new_err("Failed to rename file");
@@ -260,6 +265,7 @@ static inline QuoVar quo__mod_fs_rename(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_cp(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
     return quo_var_new_err("fs.cp() requires source and destination path strings");
   char *src_data = quo_read_file(quo_var_as_str(&argv[0])->data);
@@ -274,18 +280,23 @@ static inline QuoVar quo__mod_fs_cp(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_cwd(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
   char buf[4096];
   if (!getcwd(buf, sizeof(buf))) return quo_var_new_err("Failed to get current directory");
   return quo_var_new_obj(quo_str_new(m, buf, -1));
 }
 
 static inline QuoVar quo__mod_fs_cd(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.chdir() requires a path string");
   if (chdir(quo_var_as_str(&argv[0])->data) != 0) return quo_var_new_err("Failed to change directory");
   return quo_var_new_nil();
 }
 
 static inline QuoVar quo__mod_fs_get_tmp_dir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
 #ifdef _WIN32
   char buf[MAX_PATH];
   GetTempPath(MAX_PATH, buf);
@@ -313,6 +324,8 @@ static inline QuoVar quo__mod_fs_open(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_get_path(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
   return quo_var_new_obj(quo_var_as_fs_file(&argv[0])->path);
 }
 
@@ -327,6 +340,7 @@ static inline QuoVar quo__mod_fs_read(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_write(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("write() requires a content string");
   QuoFSFile *file = quo_var_as_fs_file(&argv[0]);
   return quo_var_new_bool(quo_write_file(file->path->data, quo_var_as_str(&argv[1])->data));

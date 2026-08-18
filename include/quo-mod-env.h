@@ -47,6 +47,7 @@ static inline QuoVar quo__mod_env_get(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_env_set(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
     return quo_var_new_err("env.set() requires key and value strings");
 #ifdef _WIN32
@@ -60,6 +61,7 @@ static inline QuoVar quo__mod_env_set(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_env_unset(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("env.unset() requires a string argument");
 #ifdef _WIN32
   char *str = quo_strdupf("%s=", quo_var_as_str(&argv[0])->data);
@@ -72,11 +74,14 @@ static inline QuoVar quo__mod_env_unset(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_env_has(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("env.has() requires a string argument");
   return quo_var_new_bool(getenv(quo_var_as_str(&argv[0])->data) != NULL);
 }
 
 static inline QuoVar quo__mod_env_all(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
   QuoDict *dict = quo_dict_new();
 #ifdef _WIN32
   char *env_block = GetEnvironmentStrings();
