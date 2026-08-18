@@ -95,8 +95,6 @@ typedef struct {
     QUO_TT_AND,      // and
     QUO_TT_OR,       // or
     QUO_TT_RETURN,   // return
-    QUO_TT_IMPORT,   // import
-    QUO_TT_AS,       // as
     // Single-character symbols
     QUO_TT_DOT,      // .
     QUO_TT_OPAREN,   // (
@@ -211,7 +209,6 @@ struct QuoStmt {
     QUO_STMT_BREAK,
     QUO_STMT_CONTINUE,
     QUO_STMT_BLOCK,
-    QUO_STMT_IMPORT,
   } type;
   union {
     struct {
@@ -228,8 +225,7 @@ struct QuoStmt {
       QuoExpr *condition;
       QuoStmt *increment;
       QuoStmt *body;
-    } loop; // Loop
-    QuoModule *import;
+    } loop;              // Loop
     QuoStmtList block;   // Block statement (multiple statements)
     QuoExpr *expression; // QuoExpr statement or return statement expression
   };
@@ -372,7 +368,7 @@ typedef bool (*QuoModuleInitFn)(QuoModule *);
 
 typedef struct QuoModule {
   QuoObj obj;        // Base class
-  QuoStr *name;      // Module name or alias
+  QuoStr *name;      // Module name
   QuoModule *parent; // Parent module
   QuoDict *modules;  // Imported modules
 
@@ -404,12 +400,11 @@ typedef struct QuoModule {
 // Create new QuoModule.
 // Arguments:
 //  - `parent`: Parent module. NULL for top-level modules.
-//  - `file_path`: Path of the file to report errors.
-//  - `name`: Name of the module.
+//     If `parent` is not NULL, the module will be added to the parent's modules registry.
 //  - `cwd`: Current working directory.
+//  - `file_path`: Path of the file relative to the `cwd`.
 //  - `source`: Source code of the module.
-QuoModule *quo_module_new(QuoModule *parent, const char *name, const char *file_path, const char *cwd, const char *source);
-void quo_module_add_export(QuoModule *module, QuoStr *name, QuoVar value);
+QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source);
 // Register a global C function for accessing in quo.
 // `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
 void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr fn);
@@ -642,13 +637,13 @@ void quo_dealloc(void *ptr) {
 
 // -------------------- UTILS -------------------- //
 
-const char *quo_tmp_sprintf(const char *fmt, ...) {
-  static _Thread_local char buf[2048];
-  va_list va;
-  va_start(va, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, va);
-  va_end(va);
-  return buf;
+bool quo_strsuffix(const char *str, const char *suffix) {
+  if (str == NULL) return false;
+  if (suffix == NULL) return true;
+  size_t str_len = strlen(str);
+  size_t suffix_len = strlen(suffix);
+  if (str_len < suffix_len) return false;
+  return strcmp(str + str_len - suffix_len, suffix) == 0;
 }
 
 char *quo_strdup(const char *str) { return quo_strndup(str, strlen(str)); }
@@ -911,8 +906,8 @@ void quo_ht_free(QuoHashTable *t) {
 // -------------------- LEXER -------------------- //
 
 static enum QuoTokenType quo__keywords[] = {
-    QUO_TT_VAR,   QUO_TT_FN,  QUO_TT_LOOP, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE, QUO_TT_TRUE,
-    QUO_TT_FALSE, QUO_TT_NIL, QUO_TT_AND,  QUO_TT_OR,    QUO_TT_RETURN,   QUO_TT_IMPORT, QUO_TT_AS,
+    QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_LOOP, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
+    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,  QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN,
 };
 static enum QuoTokenType quo__single_char_symbols[] = {
     QUO_TT_DOT,   QUO_TT_OPAREN, QUO_TT_CPAREN, QUO_TT_OBRACE, QUO_TT_CBRACE,   QUO_TT_OBRACKET, QUO_TT_CBRACKET,
@@ -1055,8 +1050,6 @@ const char *quo_token_type_str(enum QuoTokenType t) {
   case QUO_TT_AND: str = "and"; break;
   case QUO_TT_OR: str = "or"; break;
   case QUO_TT_RETURN: str = "return"; break;
-  case QUO_TT_IMPORT: str = "import"; break;
-  case QUO_TT_AS: str = "as"; break;
   case QUO_TT_DOT: str = "."; break;
   case QUO_TT_OPAREN: str = "("; break;
   case QUO_TT_CPAREN: str = ")"; break;
@@ -1379,6 +1372,46 @@ QuoCFn *quo_cfunction_new(QuoModule *m, const char *name, int64_t name_len, QuoC
 
 // - BUILT-IN FUNCTIONS - //
 
+// Find existing module
+static QuoModule *quo__mod_exists(QuoModule *m, const char *path) {
+  QuoModule *curr = m;
+  QuoStr *mod_name = quo_str_new(m, path, -1);
+  while (curr) {
+    QuoVar value = quo_dict_get(curr->modules, mod_name);
+    if (quo_var_is_module(&value)) return quo_var_as_module(&value);
+    curr = curr->parent;
+  }
+  return NULL;
+}
+
+static QuoVar quo__builtin_import(QuoModule *m, int64_t argc, QuoVar *argv) {
+  if (argc != 1 && !quo_var_is_str(&argv[0])) return quo_var_new_err("import() takes path string argument");
+  QuoStr *path = quo_var_as_str(&argv[0]);
+
+  if (!quo_strsuffix(path->data, ".quo")) {
+    QuoModule *exists = quo__mod_exists(m, path->data);
+    if (exists) return quo_var_new_obj(exists);
+  }
+
+  char *mod_path = mod_path = quo_strdupf("%s/%.*s", m->cwd, path->len, path->data);
+  char *mod_source = quo_read_file(mod_path);
+  if (!mod_source) {
+    quo_dealloc(mod_path);
+    return quo_var_new_err("Module not found");
+  }
+  char *mod_cwd = quo_dirname(mod_path);
+  QuoModule *mod = quo_module_new(m, mod_cwd, mod_path, mod_source);
+  quo_dealloc(mod_source);
+  quo_dealloc(mod_cwd);
+  quo_dealloc(mod_path);
+  if (!mod) return quo_var_new_err("Failed to compile module");
+  QuoVM *vm = quo_vm_new(mod);
+  QuoVar result = quo_vm_run(vm, mod->fn);
+  if (quo_var_is_err(&result)) return quo_var_new_err("Failed to import module");
+  quo_vm_free(vm);
+  return quo_var_new_obj(mod);
+}
+
 static QuoVar quo__builtin_type(QuoModule *m, int64_t argc, QuoVar *argv) {
   if (argc != 1) return quo_var_new_err("type() takes 1 argument");
   const char *type_str = "unknown";
@@ -1644,18 +1677,7 @@ static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
 
 // --- MODULE --- //
 
-static QuoModule *quo__module_find_mod(QuoModule *m, QuoStr *mod_name) {
-  assert(m != NULL && mod_name != NULL);
-  QuoModule *mod = m;
-  while (mod) {
-    QuoVar value = quo_dict_get(mod->modules, mod_name);
-    if (quo_var_is_module(&value)) return quo_var_as_module(&value);
-    mod = mod->parent;
-  }
-  return NULL;
-}
-
-QuoModule *quo_module_new(QuoModule *parent, const char *name, const char *file_path, const char *cwd, const char *source) {
+QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source) {
   QuoModule *m = (QuoModule *)quo_obj_new(sizeof(QuoModule));
   m->obj.type = QUO_OBJ_TYPE_MODULE;
 
@@ -1671,6 +1693,7 @@ QuoModule *quo_module_new(QuoModule *parent, const char *name, const char *file_
   // Register stdlib
 
   // Register global built-in functions
+  quo_module_register_cfn(m, "import", -1, quo__builtin_import);
   quo_module_register_cfn(m, "type", -1, quo__builtin_type);
   quo_module_register_cfn(m, "print", -1, quo__builtin_print);
   quo_module_register_cfn(m, "input", -1, quo__builtin_input);
@@ -1702,8 +1725,12 @@ QuoModule *quo_module_new(QuoModule *parent, const char *name, const char *file_
   quo__register_builtin_method(m, &m->dict_methods, "keys", quo__dict_method_keys);
   quo__register_builtin_method(m, &m->dict_methods, "values", quo__dict_method_values);
 
-  m->parent = parent;
-  m->name = name ? quo_str_new(m, name, -1) : quo_str_new(m, "<anonymous>", -1);
+  m->name = quo_str_new(m, file_path, -1);
+  if (parent) {
+    m->parent = parent;
+    QuoVar var = quo_var_new_obj(m);
+    quo_dict_set(parent->modules, m->name, &var);
+  }
   m->cwd = quo_strdup(cwd);
   m->file_path = quo_strdup(file_path);
   if (source) {
@@ -2210,13 +2237,11 @@ static QuoParseRule quo__get_parse_rule(QuoToken t) {
   case QUO_TT_IF:
   case QUO_TT_ELSE:
   case QUO_TT_RETURN:
-  case QUO_TT_IMPORT:
   case QUO_TT_CPAREN:
   case QUO_TT_CBRACE:
   case QUO_TT_CBRACKET:
   case QUO_TT_COMMA:
-  case QUO_TT_COLON:
-  case QUO_TT_AS: return (QuoParseRule){0};
+  case QUO_TT_COLON: return (QuoParseRule){0};
 
   case QUO_TT_ID: return (QuoParseRule){quo__parser_id, NULL, PREC_NONE};
   case QUO_TT_LITERAL_NUM:
@@ -2461,7 +2486,6 @@ static void quo__stmt_free(QuoStmt *stmt) {
   if (!stmt) return;
   switch (stmt->type) {
   case QUO_STMT_EXPRESSION: quo__expr_free(stmt->expression); break;
-  case QUO_STMT_IMPORT: break;
   case QUO_STMT_RETURN:
     if (stmt->expression) quo__expr_free(stmt->expression);
     break;
@@ -2617,61 +2641,6 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
   else if (quo__parser_match(m, QUO_TT_CONTINUE)) {
     if (m->loop_count == 0) quo__parser_error(m, m->current, "'continue' statement outside of loop");
     stmt = quo__stmt_new(QUO_STMT_CONTINUE);
-  }
-
-  // Import
-  else if (quo__parser_match(m, QUO_TT_IMPORT)) {
-    if (da_count(&m->scopes) > 1) quo__parser_error(m, m->previous, "Import statements can only be used at global scope");
-    quo__parser_expect(m, QUO_TT_LITERAL_STR, "Expected import path string");
-    QuoToken path = m->previous;
-    // Resolve the module path
-    char *mod_path = quo_strdupf("%s/%.*s.quo", m->cwd, path.len, path.start);
-    // Resolve the module name. If has an alias, use it, otherwise use the file name.
-    char *mod_name;
-    if (quo__parser_match(m, QUO_TT_AS)) {
-      if (quo__parser_match(m, QUO_TT_LITERAL_STR)) mod_name = quo_strndup(m->previous.start, m->previous.len);
-      else quo__parser_error(m, m->current, "Module alias should be a string literal");
-    } else mod_name = quo_file_name(mod_path);
-    // Create and compile the module
-    char *mod_cwd = quo_strdupf("%s/%.*s", m->cwd, path.len, path.start);
-    char *mod_source = quo_read_file(mod_path);
-    if (!mod_source) {
-      quo__parser_error(m, m->current, "Module not found: %.*s", path.len, path.start);
-      return NULL;
-    }
-    QuoModule *mod = quo_module_new(m, mod_name, mod_path, mod_cwd, mod_source);
-    quo_dealloc(mod_source);
-    quo_dealloc(mod_cwd);
-    quo_dealloc(mod_name);
-    quo_dealloc(mod_path);
-    if (!mod) return NULL;
-
-    QuoVM *vm = quo_vm_new(mod);
-    if (!vm) return NULL;
-    QuoVar result = quo_vm_run(vm, mod->fn);
-    if (quo_var_is_err(&result)) {
-      quo__parser_error(m, m->current, "Module '%s' failed to compile: %s", mod->name->data, result.val_err);
-      quo_vm_free(vm);
-      return NULL;
-    }
-    quo_vm_free(vm);
-
-    // Declare the module name in the global scope
-    QuoToken module_name = {
-        .start = mod->name->data,
-        .len = mod->name->len,
-        .type = QUO_TT_ID,
-        .line = path.line,
-        .column = path.column,
-    };
-    if (quo__parser_is_declared_in_current_scope(m, module_name)) {
-      quo__parser_error(m, module_name, "Variable '" QUO_TOKEN_FMT "' already declared", QUO_TOKEN_ARG(module_name));
-      return NULL;
-    }
-    quo__parser_declare_variable(m, module_name);
-
-    stmt = quo__stmt_new(QUO_STMT_IMPORT);
-    stmt->import = mod;
   }
 
   // Expression
@@ -2961,21 +2930,6 @@ static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
     if (s->expression->type != QUO_EXPR_ASSIGN) quo__function_push_instruction(c->fn, QUO_OP_POP);
     break;
   }
-  case QUO_STMT_IMPORT: {
-    QuoModule *module = s->import;
-    // Store the module as a global variable
-    QuoVar module_var = quo_var_new_obj((QuoObj *)module);
-    // Set as global
-    uint64_t ns_idx = quo__function_push_constant(c->fn, &module_var);
-    quo__function_push_instruction(c->fn, QUO_OP_CONSTANT);
-    quo__function_push_instruction(c->fn, ns_idx);
-    QuoStr *mod_name = quo_str_new(c->m, module->name->data, module->name->len);
-    QuoVar name_var = quo_var_new_obj(mod_name);
-    uint64_t name_idx = quo__function_push_constant(c->fn, &name_var);
-    quo__function_push_instruction(c->fn, QUO_OP_SET_GLOBAL);
-    quo__function_push_instruction(c->fn, name_idx);
-    break;
-  }
   case QUO_STMT_VAR_DECL: {
     // Compile initializer if present, otherwise nil
     if (s->var_decl.initializer) {
@@ -3172,7 +3126,6 @@ static QuoVar quo__vm_dispatch_call(QuoVM *vm, QuoObj *func, uint64_t argc) {
 #define CLEANUP_STACK()                                                                                                                    \
   for (uint64_t i = 0; i < argc + 1; i++) quo_var_unref(quo__vm_peek(vm, i));                                                              \
   da_count(&vm->stack) -= argc + 1;
-
   if (func->type == QUO_OBJ_TYPE_CFN) {
     QuoVar *args = quo__vm_peek(vm, argc - 1);
     QuoCFn *cfn = quo_obj_as_cfn(func);
@@ -3194,7 +3147,6 @@ static QuoVar quo__vm_dispatch_call(QuoVM *vm, QuoObj *func, uint64_t argc) {
   }
   CLEANUP_STACK();
   return quo_var_new_err("Attempt to call non-function");
-
 #undef CLEANUP_STACK
 }
 
@@ -3562,7 +3514,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
 
 void quo_vm_free(QuoVM *vm) {
   if (!vm) return;
-  for (uint64_t i = 0; i < da_count(&vm->stack); i++) quo_var_unref(&da_at(&vm->stack, i));
+  for (int i = 0; i < da_count(&vm->stack); i++) quo_var_unref(&da_at(&vm->stack, i));
   da_free(&vm->stack);
   da_free(&vm->frames);
   quo_dealloc(vm);
@@ -3662,7 +3614,6 @@ void quo_debug_statement_print(QuoStmt *stmt, int indent) {
   if (!stmt) return;
   for (int i = 0; i < indent; i++) printf("  ");
   switch (stmt->type) {
-  case QUO_STMT_IMPORT: printf("IMPORT: %s\n", stmt->import->cwd); break;
   case QUO_STMT_VAR_DECL:
     printf("VAR_DECL: " QUO_TOKEN_FMT "\n", QUO_TOKEN_ARG(stmt->var_decl.name));
     if (stmt->var_decl.initializer) quo_debug_expression_print(stmt->var_decl.initializer, indent + 1);

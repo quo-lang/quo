@@ -1,7 +1,7 @@
 #define QUO_IMPLEMENTATION
 #include "../include/quo.h"
 // Include modules
-// #include "../include/quo-mod-base64.h"
+#include "../include/quo-mod-base64.h"
 // #include "../include/quo-mod-csv.h"
 // #include "../include/quo-mod-dl.h"
 // #include "../include/quo-mod-env.h"
@@ -49,11 +49,13 @@ static int quo__run(const char *path) {
     return 1;
   }
   char *cwd = quo_dirname(path);
-  QuoModule *m = quo_module_new(NULL, path, "__main__", cwd, source);
+  QuoModule *m = quo_module_new(NULL, cwd, path, source);
   quo_dealloc(source);
   quo_dealloc(cwd);
   // If module is NULL, there was compilation error.
   if (!m) return 1;
+
+  quo_mod_base64_init(m);
 
   // Load modules
   // quo_state_register_module(s, quo_mod_base64_init, NULL);

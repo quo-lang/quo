@@ -104,38 +104,37 @@ static QuoVar quo__mod_base64_decode_impl(QuoModule *m, const char *input, int l
 }
 
 static inline QuoVar quo__mod_base64_encode(QuoModule *m, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.encode() requires a string argument");
-  QuoStr *str = quo_obj_as_str(argv[1].val_obj);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.encode() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
   return quo__mod_base64_encode_impl(m, str->data, str->len, quo__base64_table);
 }
 
 static inline QuoVar quo__mod_base64_decode(QuoModule *m, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.decode() requires a string argument");
-  QuoStr *str = quo_obj_as_str(argv[1].val_obj);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.decode() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
   return quo__mod_base64_decode_impl(m, str->data, str->len);
 }
 
 static inline QuoVar quo__mod_base64_encode_url(QuoModule *m, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.encode_url() requires a string argument");
-  QuoStr *str = quo_obj_as_str(argv[1].val_obj);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.encode_url() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
   return quo__mod_base64_encode_impl(m, str->data, str->len, quo__base64_url_table);
 }
 
 static inline QuoVar quo__mod_base64_decode_url(QuoModule *m, int64_t argc, QuoVar *argv) {
-  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("base64.decode_url() requires a string argument");
-  QuoStr *str = quo_obj_as_str(argv[1].val_obj);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.decode_url() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
   return quo__mod_base64_decode_impl(m, str->data, str->len);
 }
 
 // ---------- PUBLIC API ---------- //
 
-static inline QuoModule *quo_mod_base64_new(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, "base64", parent->file_path, parent->cwd, NULL);
+static inline void quo_mod_base64_init(QuoModule *parent) {
+  QuoModule *m = quo_module_new(parent, parent->cwd, "base64", NULL);
   quo_module_register_cfn(m, "encode", -1, quo__mod_base64_encode);
-  quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
-  quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);
-  quo_module_register_cfn(m, "decode_url", -1, quo__mod_base64_decode_url);
-  return m;
+  // quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
+  // quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);
+  // quo_module_register_cfn(m, "decode_url", -1, quo__mod_base64_decode_url);
 }
 
 #ifdef __cplusplus
