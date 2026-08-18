@@ -31,7 +31,6 @@ QUO API:
 #include <windows.h>
 #else
 #include <sys/time.h>
-#include <time.h>
 #endif
 
 #ifdef __cplusplus
@@ -65,9 +64,9 @@ static uint64_t quo__uuid_timestamp_ms(void) {
   uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
   return (t / 10000) - 11644473600000ULL;
 #else
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
 #endif
 }
 

@@ -346,13 +346,13 @@ static QuoVar quo__mod_math_random(QuoModule *m, int argc, QuoVar *argv) {
 static QuoVar quo__mod_math_deg_to_rad(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("deg_to_rad() requires a number");
-  return quo_var_new_num(quo__mod_math_as_double(&argv[0]) * M_PI / 180.0);
+  return quo_var_new_num(quo__mod_math_as_double(&argv[0]) * 3.1415926535897932384 / 180.0);
 }
 
 static QuoVar quo__mod_math_rad_to_deg(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("rad_to_deg() requires a number");
-  return quo_var_new_num(quo__mod_math_as_double(&argv[0]) * 180.0 / M_PI);
+  return quo_var_new_num(quo__mod_math_as_double(&argv[0]) * 180.0 / 3.1415926535897932384);
 }
 
 static inline void quo__mod_math_cleanup(QuoModule *m) {
@@ -401,9 +401,9 @@ static inline bool quo_mod_math_init(QuoModule *parent) {
   quo_module_register_cfn(m, "deg_to_rad", -1, quo__mod_math_deg_to_rad);
   quo_module_register_cfn(m, "rad_to_deg", -1, quo__mod_math_rad_to_deg);
 
-  quo_module_register_var(m, quo_str_new(m, "pi", -1), quo_var_new_num(M_PI));
-  quo_module_register_var(m, quo_str_new(m, "e", -1), quo_var_new_num(M_E));
-  quo_module_register_var(m, quo_str_new(m, "tau", -1), quo_var_new_num(M_PI * 2));
+  quo_module_register_var(m, quo_str_new(m, "pi", -1), quo_var_new_num(3.1415926535897932384));
+  quo_module_register_var(m, quo_str_new(m, "e", -1), quo_var_new_num(2.7182818284590452354));
+  quo_module_register_var(m, quo_str_new(m, "tau", -1), quo_var_new_num(3.1415926535897932384 * 2));
 
   return true;
 }

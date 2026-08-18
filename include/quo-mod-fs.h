@@ -86,7 +86,7 @@ typedef struct {
   QuoStr *path;
 } QuoFSFile;
 
-QUO_DEFINE_USER_TYPE(QuoFSFile, fs_file);
+QUO_DEFINE_USER_TYPE(QuoFSFile, fs_file)
 
 // ---------- PRIVATE API ---------- //
 
