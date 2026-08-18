@@ -245,7 +245,7 @@ static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int64_t argc, Quo
   QuoVar first = quo_arr_get(arr, 0);
   if (!quo_var_is_dict(&first)) return quo_var_new_err("Array elements must be dicts");
   da(QuoStr *) headers = {0};
-  for (bool i = 0; i < quo_var_as_dict(&first)->dict.capacity; i++) {
+  for (int i = 0; i < quo_var_as_dict(&first)->dict.capacity; i++) {
     QuoHashTableEntry *entry = &quo_var_as_dict(&first)->dict.items[i];
     if (entry->key) da_add(&headers, entry->key);
   }

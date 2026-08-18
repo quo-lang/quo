@@ -89,7 +89,7 @@ static inline void quo_mod_dl_init(QuoModule *parent) {
   quo_module_type_add_cfn(m, dl_handle_type, "call", -1, quo__mod_dl_call);
   quo_module_type_add_cfn(m, dl_handle_type, "close", -1, quo__mod_dl_close);
 
-  QuoObj *dl_sym_type = quo_module_register_type(m, "QuoDLSym", -1, sizeof(QuoDLSym));
+  quo_module_register_type(m, "QuoDLSym", -1, sizeof(QuoDLSym));
 }
 
 #ifdef __cplusplus

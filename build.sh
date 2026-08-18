@@ -11,7 +11,7 @@ cmd() { echo "$@";"$@"; }
 
 # Build QUO CLI
 build() {
-    CFLAGS="-g"
+    CFLAGS="-Wall -g"
     for arg in "$@"; do
         case $arg in
             release) CFLAGS="$CFLAGS -O3" ;;

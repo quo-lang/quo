@@ -767,21 +767,21 @@ bool quo_write_file(const char *path, const char *content) {
   return true;
 }
 
-static char *quo_file_name(const char *path) {
-  if (!path) return NULL;
-  // Remove the directory path from the file name
-  const char *last_slash = NULL;
-  for (const char *p = path; *p; p++)
-    if (*p == '/' || *p == '\\') last_slash = p;
-  // If no slash found, use the entire path as filename
-  const char *filename = last_slash ? last_slash + 1 : path;
-  // Remove extension - only look for dots in the filename part
-  const char *last_dot = NULL;
-  for (const char *p = filename; *p; p++)
-    if (*p == '.') last_dot = p;
-  if (!last_dot) return quo_strdup(filename);
-  return quo_strndup(filename, last_dot - filename);
-}
+// static char *quo_file_name(const char *path) {
+//   if (!path) return NULL;
+//   // Remove the directory path from the file name
+//   const char *last_slash = NULL;
+//   for (const char *p = path; *p; p++)
+//     if (*p == '/' || *p == '\\') last_slash = p;
+//   // If no slash found, use the entire path as filename
+//   const char *filename = last_slash ? last_slash + 1 : path;
+//   // Remove extension - only look for dots in the filename part
+//   const char *last_dot = NULL;
+//   for (const char *p = filename; *p; p++)
+//     if (*p == '.') last_dot = p;
+//   if (!last_dot) return quo_strdup(filename);
+//   return quo_strndup(filename, last_dot - filename);
+// }
 
 // Extracts the directory path from a file path
 // e.g., "path/to/script.quo" -> "path/to/"
@@ -1794,7 +1794,7 @@ QuoVar quo_module_run(QuoModule *m) {
 QuoVar quo_var_to_bool(QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_ERROR:
-  case QUO_VAR_TYPE_NIL: return quo_var_new_bool(false);
+  case QUO_VAR_TYPE_NIL: break;
   case QUO_VAR_TYPE_BOOL: return *v;
   case QUO_VAR_TYPE_NUM: return quo_var_new_bool(v->val_num > 0);
   case QUO_VAR_TYPE_OBJ:
@@ -1805,15 +1805,16 @@ QuoVar quo_var_to_bool(QuoVar *v) {
     case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_FN:
-    case QUO_OBJ_TYPE_CFN: return quo_var_new_bool(false);
+    case QUO_OBJ_TYPE_CFN: break;
     }
   }
+  return quo_var_new_bool(false);
 }
 
 QuoVar quo_var_to_num(QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_ERROR:
-  case QUO_VAR_TYPE_NIL: return quo_var_new_num(0.0);
+  case QUO_VAR_TYPE_NIL: break;
   case QUO_VAR_TYPE_BOOL:
   case QUO_VAR_TYPE_NUM: return *v;
   case QUO_VAR_TYPE_OBJ:
@@ -1824,15 +1825,16 @@ QuoVar quo_var_to_num(QuoVar *v) {
     case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_FN:
     case QUO_OBJ_TYPE_USER:
-    case QUO_OBJ_TYPE_CFN: return quo_var_new_num(0.0);
+    case QUO_OBJ_TYPE_CFN: break;
     }
   }
+  return quo_var_new_num(0.0);
 }
 
 QuoVar quo_var_to_str(QuoModule *m, QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_ERROR:
-  case QUO_VAR_TYPE_NIL: return quo_var_new_obj(quo_str_new(m, "", 0));
+  case QUO_VAR_TYPE_NIL: break;
   case QUO_VAR_TYPE_BOOL: return quo_var_new_obj(quo_str_new(m, v->val_num ? "true" : "false", -1));
   case QUO_VAR_TYPE_NUM: {
     char buf[318];
@@ -1850,6 +1852,7 @@ QuoVar quo_var_to_str(QuoModule *m, QuoVar *v) {
     case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new(m, "", 0));
     }
   }
+  return quo_var_new_obj(quo_str_new(m, "", 0));
 }
 
 // --- MATH FUNCTIONS --- //
@@ -2017,6 +2020,7 @@ int64_t quo_var_print(QuoVar *v) {
     }
   }
   }
+  return 0;
 }
 
 // ------------------------------ PARSER ------------------------------ //
@@ -2087,15 +2091,6 @@ static bool quo__parser_is_declared(QuoModule *m, QuoToken name) {
     for (int i = 0; i < da_count(scope); i++)
       if (quo_tokens_eq(da_at(scope, i), name)) return true;
   }
-  return false;
-}
-
-// Check if variable is declared in the global scope (first scope)
-static bool quo__parser_is_global(QuoModule *m, QuoToken name) {
-  if (da_count(&m->scopes) == 0) return false;
-  QuoTokenList *global_scope = &da_at(&m->scopes, 0);
-  for (int i = 0; i < da_count(global_scope); i++)
-    if (quo_tokens_eq(da_at(global_scope, i), name)) return true;
   return false;
 }
 
@@ -2242,6 +2237,7 @@ static QuoParseRule quo__get_parse_rule(QuoToken t) {
   case QUO_TT_BANG: return (QuoParseRule){quo__parser_unary, NULL, PREC_NONE};
   case QUO_TT_QUESTION: return (QuoParseRule){NULL, quo__parser_ternary_expr, PREC_TERNARY};
   }
+  return (QuoParseRule){NULL, NULL, PREC_NONE};
 }
 
 static QuoExpr *quo__parser_parse_precedence(QuoModule *m, enum QuoPrecedence precedence) {
@@ -2622,12 +2618,6 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
 // ------------------------------ COMPILER ------------------------------ //
 
 static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *stmt);
-
-static bool quo__compiler_is_global_declared(QuoCompiler *c, QuoToken name) {
-  for (int i = 0; i < da_count(&c->declared_globals); i++)
-    if (quo_tokens_eq(da_at(&c->declared_globals, i), name)) return true;
-  return false;
-}
 
 static void quo__compiler_begin_scope(QuoCompiler *c) { c->scope_depth++; }
 
@@ -3309,7 +3299,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       QuoVar *value = quo__vm_peek(vm, 0);
       quo_var_ref(value);
       quo_ht_set(&frame->function->m->globals, quo_var_as_str(&name_var), value);
-      da_pop(&vm->stack);
+      vm->stack.count--;
       break;
     }
     case QUO_OP_MEMBER_ACCESS: {
@@ -3701,6 +3691,7 @@ static const char *quo__debug_op_str(QuoOP op) {
   case QUO_OP_MEMBER_ACCESS: return "OP_MEMBER_ACCESS";
   case QUO_OP_SET_MEMBER: return "OP_SET_MEMBER";
   }
+  return "UNKNOWN";
 }
 
 int quo_debug_instruction_disassemble(QuoFn *fn, int offset) {

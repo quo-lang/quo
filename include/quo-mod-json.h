@@ -274,7 +274,7 @@ static void quo__json_stringify_value(QuoStringBuilder *sb, QuoVar *v) {
     case QUO_OBJ_TYPE_DICT: {
       da_add(sb, '{');
       bool first = true;
-      for (bool i = 0; i < quo_var_as_dict(v)->dict.capacity; i++) {
+      for (int i = 0; i < quo_var_as_dict(v)->dict.capacity; i++) {
         QuoHashTableEntry *entry = &quo_var_as_dict(v)->dict.items[i];
         if (entry->key) {
           if (!first) da_add(sb, ',');

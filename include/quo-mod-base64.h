@@ -71,7 +71,6 @@ static QuoVar quo__mod_base64_decode_impl(QuoModule *m, const char *input, int l
   if (len > 1 && input[len - 2] == '=') padding++;
 
   for (int i = 0; i < len; i += 4) {
-    int remaining = len - i;
     unsigned char sextet[4] = {0};
     int valid_sextets = 0;
     for (int j = 0; j < 4 && (i + j) < len; j++) {

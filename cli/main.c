@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
       quo__print_help(argv[0]);
       return 1;
     }
-    const char *path = argv[2];
+    // const char *path = argv[2];
     // return quo__format(path);
   } else return quo__run(arg);
 }

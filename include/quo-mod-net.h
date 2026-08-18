@@ -160,7 +160,7 @@ static QuoVar quo__mod_net_perform_request(QuoModule *m, const char *url, const 
   // Set headers
   void *header_list = NULL;
   if (headers_dict) {
-    for (bool i = 0; i < headers_dict->dict.capacity; i++) {
+    for (int i = 0; i < headers_dict->dict.capacity; i++) {
       QuoHashTableEntry *entry = &headers_dict->dict.items[i];
       if (entry->key) {
         char *header = quo_strdupf("%s: %s", entry->key->data, quo_var_is_str(&entry->value) ? quo_var_as_str(&entry->value)->data : "");
