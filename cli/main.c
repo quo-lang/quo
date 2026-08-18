@@ -1,5 +1,6 @@
 #define QUO_IMPLEMENTATION
 #include "../include/quo.h"
+
 // Include modules
 #include "../include/quo-mod-base64.h"
 #include "../include/quo-mod-csv.h"
@@ -43,40 +44,40 @@
 // }
 
 static int quo__run(const char *path) {
-  int64_t exit_code = 0;
+  char *source = quo_read_file(path);
+  if (!source) {
+    fprintf(stderr, "Failed to read file: %s\n", path);
+    return 1;
+  }
   char *cwd = quo_dirname(path);
-  QuoState *s = quo_state_new(cwd);
+  QuoModule *m = quo_module_new(NULL, cwd, path, source, NULL);
+  quo_dealloc(source);
   quo_dealloc(cwd);
+  // If module is NULL, there was compilation error.
+  if (!m) return 1;
 
   // Load modules
-  quo_state_register_module(s, quo_mod_base64_init, NULL);
-  quo_state_register_module(s, quo_mod_csv_init, NULL);
-  quo_state_register_module(s, quo_mod_dl_init, NULL);
-  quo_state_register_module(s, quo_mod_env_init, NULL);
-  quo_state_register_module(s, quo_mod_fs_init, NULL);
-  quo_state_register_module(s, quo_mod_json_init, NULL);
-  quo_state_register_module(s, quo_mod_math_init, NULL);
-  quo_state_register_module(s, quo_mod_net_init, quo_mod_net_cleanup);
-  quo_state_register_module(s, quo_mod_os_init, NULL);
-  quo_state_register_module(s, quo_mod_time_init, NULL);
-  quo_state_register_module(s, quo_mod_uuid_init, NULL);
+  quo_mod_base64_init(m);
+  quo_mod_csv_init(m);
+  quo_mod_dl_init(m);
+  quo_mod_env_init(m);
+  quo_mod_fs_init(m);
+  quo_mod_json_init(m);
+  quo_mod_math_init(m);
+  quo_mod_net_init(m);
+  quo_mod_os_init(m);
+  quo_mod_time_init(m);
+  quo_mod_uuid_init(m);
 
-  // Run code
-  QuoParser *p = quo_parser_new(s, path);
-  if (p && quo_parser_parse(p)) {
-    QuoCompiler *c = quo_compiler_new(s, "main", -1);
-    QuoFn *main = quo_compiler_compile(c, p->ast);
-    quo_compiler_free(c);
-    QuoVM *vm = quo_vm_new(s);
-    QuoVar result = quo_vm_run(vm, main);
-    if (quo_var_is_err(&result)) fprintf(stderr, "Runtime error: %s\n", result.val_err);
-    else if (quo_var_is_num(&result)) exit_code = (int64_t)result.val_num;
-    quo_var_unref(&result);
-    quo_vm_free(vm);
-  }
-
-  quo_parser_free(p);
-  quo_state_free(s);
+  int exit_code = 0;
+  QuoVar result = quo_module_run(m);
+  if (quo_var_is_err(&result)) {
+    fprintf(stderr, "Runtime Error: %s\n", result.val_err);
+    exit_code = 1;
+  } else if (quo_var_is_num(&result)) exit_code = (int)result.val_num;
+  quo_var_unref(&result);
+  quo_obj_unref((QuoObj *)m);
+  // quo_vm_free(vm);
 
   return exit_code;
 }
