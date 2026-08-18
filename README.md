@@ -139,8 +139,6 @@ cat.speak("meow") # Cat says "meow"
 | `nil`      | Nil literal               |
 | `true`     | Boolean literal           |
 | `false`    | Boolean literal           |
-| `import`   | Import statement          |
-| `as`       | Import alias              |
 
 ### Basic Types
 
@@ -305,6 +303,7 @@ Quo supports the following operators:
 
 ### Built-in Functions
 
+- `import(path)`: Imports a module from the given path. Returns the module object.
 - `print(value, ...)`: Prints the values to the console, separated by spaces, adding new line at the end.
 - `type(value)`: Get the type of the variable as string.
 - `input(value, ...)`: Get the user input as string, printing optional prompt.
@@ -346,14 +345,13 @@ They are accessed using the dot notation: `value.method()`.
 They're source is in the `include` directory with `quo-mod-*.h` names.
 They are can be selectively disabled when [Embedding](#embedding) in your own code.
 
-Modules are implemented as **global dictionary variables** (e. g `namespaces`) and available in any `.quo` script.
-
 All functions are implemented in **C** so they are fast and efficient.
 
 **Example usage:**
 
 ```js
-var encoded_string = base64.encode("Hello, World!")
+var b64 = import("base64")
+var encoded_string = b64.encode("Hello, World!")
 print(encoded_string) # SGVsbG8sIFdvcmxkIQ==
 ```
 
@@ -504,55 +502,40 @@ It is very simple to embed Quo in your own code.
 #include "../include/quo-mod-uuid.h"
 
  int main() {
-  int64_t exit_code = 0;
   const char *path = "path/to/script.quo";
-  // Get the directory name of the .quo script. It will be used as the current working directory.
-  char *cwd = quo_dirname(path);
-  // Create a Quo state with the script current working directory.
-  QuoModule *m = quo_state_new(cwd);
-
-  // Load modules
-  quo_state_register_module(s, quo_mod_base64_init, NULL);
-  quo_state_register_module(s, quo_mod_csv_init, NULL);
-  quo_state_register_module(s, quo_mod_dl_init, NULL);
-  quo_state_register_module(s, quo_mod_env_init, NULL);
-  quo_state_register_module(s, quo_mod_fs_init, NULL);
-  quo_state_register_module(s, quo_mod_json_init, NULL);
-  quo_state_register_module(s, quo_mod_math_init, NULL);
-  quo_state_register_module(s, quo_mod_os_init, NULL);
-  quo_state_register_module(s, quo_mod_time_init, NULL);
-  quo_state_register_module(s, quo_mod_uuid_init, NULL);
-  // Some modules require cleanup, so we register them with cleanup functions that will be called when the state is freed.
-  quo_state_register_module(s, quo_mod_net_init, quo_mod_net_cleanup);
-
-  // Create a parser for the script.
-  QuoParser *p = quo_parser_new(s, path);
-  // Parse the script and compile it.
-  if (quo_parser_parse(p)) {
-    // Create a compiler for the parsed AST script.
-    QuoCompiler *c = quo_compiler_new(s, "main", -1);
-    // Compile the AST into a main function.
-    QuoFn *main = quo_compiler_compile(c, p->ast);
-    // Create a VM to run the compiled function.
-    QuoVM *vm = quo_vm_new(s);
-    // Run the main function and get the result.
-    QuoVar result = quo_vm_run(vm, main);
-    // Check the result and handle any errors.
-    if (quo_var_is_err(&result)) fprintf(stderr, "Runtime error: %s\n", result.val_err);
-    // Here we're returning number from the main function so we can use it as the exit code.
-    // You can return any value type from the main function.
-    else if (quo_var_is_num(&result)) exit_code = (int64_t)result.val_num;
-    // Unreference the result and free the compiler and VM.
-    quo_var_unref(&result);
-    quo_compiler_free(c);
-    quo_vm_free(vm);
+  char *source = quo_read_file(path);
+  if (!source) {
+    fprintf(stderr, "Failed to read file: %s\n", path);
+    return 1;
   }
-  // Free the parser and state.
-  quo_parser_free(p);
-  quo_state_free(s);
-  // Free the current working directory.
+  char *cwd = quo_dirname(path);
+  QuoModule *m = quo_module_new(NULL, cwd, path, source, NULL);
+  quo_dealloc(source);
   quo_dealloc(cwd);
-  // Return the exit code.
+  // If module is NULL, there was compilation error.
+  if (!m) return 1;
+  // Load stdlib modules
+  quo_mod_base64_init(m);
+  quo_mod_csv_init(m);
+  quo_mod_dl_init(m);
+  quo_mod_env_init(m);
+  quo_mod_fs_init(m);
+  quo_mod_json_init(m);
+  quo_mod_math_init(m);
+  quo_mod_net_init(m);
+  quo_mod_os_init(m);
+  quo_mod_time_init(m);
+  quo_mod_uuid_init(m);
+  // Run the module and get the result.
+  int exit_code = 0;
+  QuoVar result = quo_module_run(m);
+  if (quo_var_is_err(&result)) {
+    fprintf(stderr, "Runtime Error: %s\n", result.val_err);
+    exit_code = 1;
+  } else if (quo_var_is_num(&result)) exit_code = (int)result.val_num;
+  quo_var_unref(&result);
+  quo_obj_unref((QuoObj *)m);
+
   return exit_code;
 }
 ```
