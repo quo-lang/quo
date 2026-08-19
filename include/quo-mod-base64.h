@@ -31,9 +31,6 @@ extern "C" {
 
 // ---------- PRIVATE API ---------- //
 
-static const char quo__base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static const char quo__base64_url_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
 static int quo__base64_decode_char(char c) {
   if (c >= 'A' && c <= 'Z') return c - 'A';
   if (c >= 'a' && c <= 'z') return c - 'a' + 26;
@@ -43,7 +40,7 @@ static int quo__base64_decode_char(char c) {
   return -1;
 }
 
-static QuoVar quo__mod_base64_encode_impl(QuoModule *m, const char *input, int len, const char *table) {
+static QuoVar quo__mod_base64_encode_impl(const char *input, int len, const char *table) {
   QuoStringBuilder sb = quo_sb_new();
   for (int i = 0; i < len; i += 3) {
     int remaining = len - i;
@@ -64,7 +61,7 @@ static QuoVar quo__mod_base64_encode_impl(QuoModule *m, const char *input, int l
   return quo_var_new_obj(result);
 }
 
-static QuoVar quo__mod_base64_decode_impl(QuoModule *m, const char *input, int len) {
+static QuoVar quo__mod_base64_decode_impl(const char *input, int len) {
   QuoStringBuilder sb = quo_sb_new();
   int padding = 0;
   if (len > 0 && input[len - 1] == '=') padding++;
@@ -98,27 +95,31 @@ static QuoVar quo__mod_base64_decode_impl(QuoModule *m, const char *input, int l
 }
 
 static inline QuoVar quo__mod_base64_encode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.encode() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[0].val_obj);
-  return quo__mod_base64_encode_impl(m, str->data, str->len, quo__base64_table);
+  return quo__mod_base64_encode_impl(str->data, str->len, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
 }
 
 static inline QuoVar quo__mod_base64_decode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.decode() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[0].val_obj);
-  return quo__mod_base64_decode_impl(m, str->data, str->len);
+  return quo__mod_base64_decode_impl(str->data, str->len);
 }
 
 static inline QuoVar quo__mod_base64_encode_url(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.encode_url() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[0].val_obj);
-  return quo__mod_base64_encode_impl(m, str->data, str->len, quo__base64_url_table);
+  return quo__mod_base64_encode_impl(str->data, str->len, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_");
 }
 
 static inline QuoVar quo__mod_base64_decode_url(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.decode_url() requires a string argument");
   QuoStr *str = quo_obj_as_str(argv[0].val_obj);
-  return quo__mod_base64_decode_impl(m, str->data, str->len);
+  return quo__mod_base64_decode_impl(str->data, str->len);
 }
 
 // ---------- PUBLIC API ---------- //

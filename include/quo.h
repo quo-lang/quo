@@ -464,15 +464,7 @@ static inline bool quo_var_is_true(const QuoVar *v) {
 
 QuoVar quo_var_to_bool(QuoVar *v);
 QuoVar quo_var_to_num(QuoVar *v);
-QuoVar quo_var_to_str(QuoModule *m, QuoVar *v);
-
-QuoVar quo_var_add(QuoModule *m, QuoVar *a, QuoVar *b);
-QuoVar quo_var_mul(QuoModule *m, QuoVar *a, QuoVar *b);
-QuoVar quo_var_sub(QuoVar *a, QuoVar *b);
-QuoVar quo_var_div(QuoVar *a, QuoVar *b);
-
-QuoVar quo_var_neg(QuoVar *v);
-QuoVar quo_var_not(QuoVar *v);
+QuoVar quo_var_to_str(QuoVar *v);
 int quo_var_len(QuoVar *v);
 int quo_var_print(QuoVar *v);
 
@@ -1474,7 +1466,7 @@ static QuoVar quo__builtin_num(QuoModule *m, int argc, QuoVar *argv) {
 }
 static QuoVar quo__builtin_str(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(argc);
-  return quo_var_to_str(m, &argv[0]);
+  return quo_var_to_str(&argv[0]);
 }
 static QuoVar quo__builtin_len(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
@@ -1864,7 +1856,7 @@ QuoVar quo_var_to_num(QuoVar *v) {
   return quo_var_new_num(0.0);
 }
 
-QuoVar quo_var_to_str(QuoModule *m, QuoVar *v) {
+QuoVar quo_var_to_str(QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_ERROR:
   case QUO_VAR_TYPE_NIL: break;
@@ -1882,86 +1874,10 @@ QuoVar quo_var_to_str(QuoModule *m, QuoVar *v) {
     case QUO_OBJ_TYPE_DICT:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_FN:
-    case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new_interned(m, "", 0));
+    case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new_tmp("", 0));
     }
   }
-  return quo_var_new_obj(quo_str_new_interned(m, "", 0));
-}
-
-// --- MATH FUNCTIONS --- //
-
-QuoVar quo_var_add(QuoModule *m, QuoVar *a, QuoVar *b) {
-  if (quo_var_is_num(a) && quo_var_is_num(b)) { return quo_var_new_num(a->val_num + b->val_num); }
-  if (quo_var_is_str(a) || quo_var_is_str(b)) {
-    const QuoVar str_a = quo_var_to_str(m, a);
-    const QuoVar str_b = quo_var_to_str(m, b);
-    char *str = quo_strdupf("%s%s", quo_obj_as_str(str_a.val_obj)->data, quo_obj_as_str(str_b.val_obj)->data);
-    QuoStr *res = quo_str_new_tmp(str, -1);
-    quo_dealloc(str);
-    return quo_var_new_obj(res);
-  }
-  if (quo_var_is_arr(a) && quo_var_is_arr(b)) {
-    QuoArr *a_arr = quo_obj_as_arr(a->val_obj);
-    QuoArr *b_arr = quo_obj_as_arr(b->val_obj);
-    for (int i = 0; i < quo_arr_len(b_arr); i++) quo_arr_push(a_arr, quo_arr_get(b_arr, i));
-    return *a;
-  }
-  return quo_var_new_err("Types don't support addition");
-}
-
-QuoVar quo_var_sub(QuoVar *a, QuoVar *b) {
-  if (quo_var_is_num(a) && quo_var_is_num(b)) return quo_var_new_num(a->val_num - b->val_num);
-  return quo_var_new_err("Types don't support subtraction");
-}
-
-QuoVar quo_var_mul(QuoModule *m, QuoVar *a, QuoVar *b) {
-  // Numeric multiplication
-  if (quo_var_is_num(a) && quo_var_is_num(b)) return quo_var_new_num(a->val_num * b->val_num);
-  // String repetition: "foo" * 3 -> "foofoofoo"
-  if ((quo_var_is_str(a) && quo_var_is_num(b)) || (quo_var_is_num(a) && quo_var_is_str(b))) {
-    QuoVar *num_var = quo_var_is_num(a) ? a : b;
-    QuoVar *str_var = quo_var_is_str(a) ? a : b;
-    if (num_var->val_num <= 0) return quo_var_new_obj(quo_str_new_tmp("", 0));
-    QuoStr *str = quo_var_as_str(str_var);
-    int len = str->len * num_var->val_num;
-    char *data = quo_alloc(NULL, len + 1);
-    for (int i = 0; i < (int)num_var->val_num; i++) memcpy(data + (i * str->len), str->data, str->len);
-    data[len] = '\0';
-    QuoStr *string = quo_str_new_tmp(data, -1);
-    quo_dealloc(data);
-    return quo_var_new_obj(string);
-  }
-  // Invalid operation
-  return quo_var_new_err("Types don't support multiplication");
-}
-
-QuoVar quo_var_div(QuoVar *a, QuoVar *b) {
-  if (quo_var_is_num(a) && quo_var_is_num(b)) {
-    if (b->val_num == 0.0) return quo_var_new_err("Division by zero");
-    return quo_var_new_num(a->val_num / b->val_num);
-  }
-  return quo_var_new_err("Types don't support division");
-}
-
-QuoVar quo_var_mod(QuoVar *a, QuoVar *b) {
-  if (quo_var_is_num(a) && quo_var_is_num(b)) {
-    int a_val = (int)a->val_num;
-    int b_val = (int)b->val_num;
-    if (b_val == 0) return quo_var_new_err("Modulo by zero");
-    return quo_var_new_num(a_val % b_val);
-  }
-  return quo_var_new_err("Types don't support modulo");
-}
-
-QuoVar quo_var_neg(QuoVar *a) {
-  if (quo_var_is_num(a)) return quo_var_new_num(-a->val_num);
-  return quo_var_new_err("Type don't support negation");
-}
-
-QuoVar quo_var_not(QuoVar *a) {
-  if (quo_var_is_bool(a)) return quo_var_new_bool(a->val_num != 0 ? false : true);
-  if (quo_var_is_nil(a)) return quo_var_new_bool(true);
-  return quo_var_new_err("Type don't support logical negation");
+  return quo_var_new_obj(quo_str_new_tmp("", 0));
 }
 
 static inline bool quo_var_eq(QuoVar *a, QuoVar *b) {
@@ -3205,52 +3121,98 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       break;
     }
     case QUO_OP_ADD: {
-      QuoVar result = quo_var_add(vm->m, quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
+      QuoVar *b = quo__vm_peek(vm, 0);
+      QuoVar *a = quo__vm_peek(vm, 1);
+      QuoVar result;
+      if (quo_var_is_num(a) && quo_var_is_num(b)) result = quo_var_new_num(a->val_num + b->val_num);
+      else if (quo_var_is_str(a) || quo_var_is_str(b)) {
+        const QuoVar str_a = quo_var_to_str(a);
+        const QuoVar str_b = quo_var_to_str(b);
+        char *str = quo_strdupf("%s%s", quo_obj_as_str(str_a.val_obj)->data, quo_obj_as_str(str_b.val_obj)->data);
+        QuoStr *res = quo_str_new_tmp(str, -1);
+        quo_dealloc(str);
+        result = quo_var_new_obj(res);
+      } else if (quo_var_is_arr(a) && quo_var_is_arr(b)) {
+        QuoArr *a_arr = quo_obj_as_arr(a->val_obj);
+        QuoArr *b_arr = quo_obj_as_arr(b->val_obj);
+        for (int i = 0; i < quo_arr_len(b_arr); i++) quo_arr_push(a_arr, quo_arr_get(b_arr, i));
+        result = *a;
+      } else return quo_var_new_err("Types don't support addition");
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, result);
       break;
     }
     case QUO_OP_SUB: {
-      QuoVar result = quo_var_sub(quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
+      QuoVar *b = quo__vm_peek(vm, 0);
+      QuoVar *a = quo__vm_peek(vm, 1);
+      QuoVar result;
+      if (quo_var_is_num(a) && quo_var_is_num(b)) result = quo_var_new_num(a->val_num - b->val_num);
+      else return quo_var_new_err("Types don't support subtraction");
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, result);
       break;
     }
     case QUO_OP_MUL: {
-      QuoVar result = quo_var_mul(vm->m, quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
+      QuoVar *b = quo__vm_peek(vm, 0);
+      QuoVar *a = quo__vm_peek(vm, 1);
+      QuoVar result;
+      // Numeric multiplication
+      if (quo_var_is_num(a) && quo_var_is_num(b)) result = quo_var_new_num(a->val_num * b->val_num);
+      // String repetition: "foo" * 3 -> "foofoofoo"
+      else if ((quo_var_is_str(a) && quo_var_is_num(b)) || (quo_var_is_num(a) && quo_var_is_str(b))) {
+        QuoVar *num_var = quo_var_is_num(a) ? a : b;
+        QuoVar *str_var = quo_var_is_str(a) ? a : b;
+        if (num_var->val_num <= 0) return quo_var_new_obj(quo_str_new_tmp("", 0));
+        QuoStr *str = quo_var_as_str(str_var);
+        int len = str->len * num_var->val_num;
+        char *data = quo_alloc(NULL, len + 1);
+        for (int i = 0; i < (int)num_var->val_num; i++) memcpy(data + (i * str->len), str->data, str->len);
+        data[len] = '\0';
+        QuoStr *string = quo_str_new_tmp(data, -1);
+        quo_dealloc(data);
+        result = quo_var_new_obj(string);
+      } else return quo_var_new_err("Types don't support multiplication");
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, result);
       break;
     }
     case QUO_OP_DIV: {
-      QuoVar result = quo_var_div(quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
+      QuoVar *b = quo__vm_peek(vm, 0);
+      QuoVar *a = quo__vm_peek(vm, 1);
+      QuoVar result;
+      if (quo_var_is_num(a) && quo_var_is_num(b)) {
+        if (b->val_num == 0) return quo_var_new_err("Division by zero");
+        result = quo_var_new_num(a->val_num / b->val_num);
+      } else return quo_var_new_err("Types don't support division");
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, result);
       break;
     }
     case QUO_OP_MOD: {
-      QuoVar result = quo_var_mod(quo__vm_peek(vm, 1), quo__vm_peek(vm, 0));
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
+      QuoVar *b = quo__vm_peek(vm, 0);
+      QuoVar *a = quo__vm_peek(vm, 1);
+      QuoVar result;
+      if (quo_var_is_num(a) && quo_var_is_num(b)) {
+        int a_val = (int)a->val_num;
+        int b_val = (int)b->val_num;
+        if (b_val == 0) return quo_var_new_err("Modulo by zero");
+        result = quo_var_new_num(a_val % b_val);
+      } else return quo_var_new_err("Types don't support modulo");
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, result);
       break;
     }
     case QUO_OP_NEGATE: {
       QuoVar *value = quo__vm_peek(vm, 0);
-      QuoVar result = quo_var_neg(value);
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
-      *value = result;
+      if (quo_var_is_num(value)) value->val_num = -(value->val_num);
+      else return quo_var_new_err("Type don't support negation");
       break;
     }
     case QUO_OP_NOT: {
       QuoVar *value = quo__vm_peek(vm, 0);
-      QuoVar result = quo_var_not(value);
-      if (quo_var_is_err(&result)) return quo_var_new_err(result.val_err);
-      *value = result;
+      if (quo_var_is_bool(value)) value->val_num = value->val_num > 0 ? false : true;
+      else if (quo_var_is_nil(value)) value->val_num = true;
+      else return quo_var_new_err("Type don't support logical negation");
       break;
     }
     case QUO_OP_EQ: {
