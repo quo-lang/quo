@@ -307,13 +307,16 @@ typedef struct QuoStr {
   int len;      // Byte length
   int char_len; // Character count (UTF-8)
   int hash;     // Hash
+  bool interned;
 } QuoStr;
 
-// Creates a new QuoStr from a C string. Process escape sequences. All strings are interned.
+// Creates a new interned QuoStr from a C string. Process escape sequences.
 // Pass `len` as `-1` for NULL-terminated strings.
-QuoStr *quo_str_new(QuoModule *m, const char *str, int len);
-// Create string from raw data (no escape processing)
-QuoStr *quo_str_new_raw(QuoModule *m, const char *str, int len);
+QuoStr *quo_str_new_interned(QuoModule *m, const char *str, int len);
+// Creates a new interned QuoStr from raw data (no escape processing).
+QuoStr *quo_str_new_interned_raw(QuoModule *m, const char *str, int len);
+// Create not interned string
+QuoStr *quo_str_new_tmp(const char *str, int len);
 
 static inline QuoStr *quo_obj_as_str(const QuoObj *o) { return (QuoStr *)o; }
 
@@ -378,8 +381,9 @@ typedef struct QuoModule {
   QuoModule *parent; // Parent module
   QuoDict *modules;  // Imported modules
 
-  QuoHashTable types;        // User-defined types registry
   QuoHashTable string_table; // String interning
+
+  QuoHashTable types; // User-defined types registry
   QuoHashTable str_methods;
   QuoHashTable arr_methods;
   QuoHashTable dict_methods;
@@ -467,8 +471,6 @@ QuoVar quo_var_mul(QuoModule *m, QuoVar *a, QuoVar *b);
 QuoVar quo_var_sub(QuoVar *a, QuoVar *b);
 QuoVar quo_var_div(QuoVar *a, QuoVar *b);
 
-bool quo_var_eq(QuoVar *a, QuoVar *b);
-int quo_var_cmp(QuoVar *a, QuoVar *b);
 QuoVar quo_var_neg(QuoVar *v);
 QuoVar quo_var_not(QuoVar *v);
 int quo_var_len(QuoVar *v);
@@ -833,13 +835,12 @@ static void quo__ht_adjust_capacity(QuoHashTable *t, int capacity) {
 }
 
 int quo_hash(const char *str, int len) {
-  int hash = 5381;
-  int c;
-  while (len--) {
-    c = *str++;
-    hash = ((hash << 5) + hash) + c;
+  uint32_t hash = 2166136261u;
+  for (int i = 0; i < len; i++) {
+    hash ^= (unsigned char)str[i];
+    hash *= 16777619u;
   }
-  return hash;
+  return (int)hash;
 }
 
 void quo_ht_init(QuoHashTable *t) {
@@ -1085,7 +1086,7 @@ void quo_obj_ref(QuoObj *obj) {
 
 void quo_obj_unref(QuoObj *obj) {
   if (!obj) return;
-  if (quo_obj_is_str(obj)) return;
+  if (quo_obj_is_str(obj) && quo_obj_as_str(obj)->interned) return; // Interned strings are managed by the module
   obj->ref_count--;
   if (obj->ref_count > 0) return;
   switch (obj->type) {
@@ -1148,7 +1149,7 @@ void quo_obj_unref(QuoObj *obj) {
     quo_ht_free(&m->string_table);
     break;
   }
-  case QUO_OBJ_TYPE_STR:
+  case QUO_OBJ_TYPE_STR: quo_dealloc(quo_obj_as_str(obj)->data); break;
   case QUO_OBJ_TYPE_CFN:
   case QUO_OBJ_TYPE_USER: break;
   }
@@ -1171,7 +1172,7 @@ static inline QuoStr *quo__find_string(QuoHashTable *table, const char *chars, i
   }
 }
 
-QuoStr *quo_str_new(QuoModule *m, const char *str, int len) {
+QuoStr *quo_str_new_interned(QuoModule *m, const char *str, int len) {
   if (len < 0) len = strlen(str);
   // Process escape sequences
   char *processed = quo_alloc(NULL, len + 1);
@@ -1207,12 +1208,12 @@ QuoStr *quo_str_new(QuoModule *m, const char *str, int len) {
   string->len = out_len;
   string->char_len = quo__utf8_strlen(processed, out_len);
   string->hash = hash;
+  string->interned = true;
   quo_ht_set(&m->string_table, string, &quo_var_new_nil());
   return string;
 }
 
-// Create string from raw data (no escape processing)
-QuoStr *quo_str_new_raw(QuoModule *m, const char *str, int len) {
+QuoStr *quo_str_new_interned_raw(QuoModule *m, const char *str, int len) {
   if (len < 0) len = strlen(str);
   int hash = quo_hash(str, len);
   QuoStr *existing = quo__find_string(&m->string_table, str, len, hash);
@@ -1224,7 +1225,20 @@ QuoStr *quo_str_new_raw(QuoModule *m, const char *str, int len) {
   string->len = len;
   string->char_len = quo__utf8_strlen(str, len);
   string->hash = hash;
+  string->interned = true;
   quo_ht_set(&m->string_table, string, &quo_var_new_nil());
+  return string;
+}
+
+QuoStr *quo_str_new_tmp(const char *str, int len) {
+  if (len < 0) len = strlen(str);
+  QuoStr *string = (QuoStr *)quo_obj_new(sizeof(QuoStr));
+  string->obj.type = QUO_OBJ_TYPE_STR;
+  string->data = quo_strndup(str, len);
+  string->len = len;
+  string->char_len = quo__utf8_strlen(str, len);
+  string->hash = quo_hash(str, len);
+  string->interned = false;
   return string;
 }
 
@@ -1260,7 +1274,7 @@ bool quo_dict_del(QuoDict *dict, QuoStr *key) {
 QuoFn *quo_function_new(QuoModule *m, const char *name, int name_len) {
   QuoFn *fn = (QuoFn *)quo_obj_new(sizeof(QuoFn));
   fn->obj.type = QUO_OBJ_TYPE_FN;
-  fn->name = quo_str_new(m, name, name_len);
+  fn->name = quo_str_new_interned(m, name, name_len);
   fn->arity = -1;
   fn->m = m;
   return fn;
@@ -1340,8 +1354,8 @@ int quo_arr_len(QuoArr *arr) { return da_count(&arr->arr); }
 QuoCFn *quo_cfunction_new(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr ptr) {
   QuoCFn *fn = (QuoCFn *)quo_obj_new(sizeof(QuoCFn));
   fn->obj.type = QUO_OBJ_TYPE_CFN;
-  fn->obj.name = quo_str_new(m, "cfn", -1);
-  fn->name = quo_str_new(m, name, name_len);
+  fn->obj.name = quo_str_new_interned(m, "cfn", -1);
+  fn->name = quo_str_new_interned(m, name, name_len);
   fn->fn = ptr;
   return fn;
 }
@@ -1353,7 +1367,7 @@ QuoCFn *quo_cfunction_new(QuoModule *m, const char *name, int name_len, QuoCFunc
 // Find existing module
 static QuoModule *quo__mod_exists(QuoModule *m, const char *path) {
   QuoModule *curr = m;
-  QuoStr *mod_name = quo_str_new(m, path, -1);
+  QuoStr *mod_name = quo_str_new_interned(m, path, -1);
   while (curr) {
     QuoVar value = quo_dict_get(curr->modules, mod_name);
     if (quo_var_is_module(&value)) return quo_var_as_module(&value);
@@ -1409,7 +1423,7 @@ static QuoVar quo__builtin_type(QuoModule *m, int argc, QuoVar *argv) {
     case QUO_OBJ_TYPE_USER: type_str = argv[0].val_obj->name ? argv[0].val_obj->name->data : "USER"; break;
     }
   }
-  return quo_var_new_obj(quo_str_new(m, type_str, -1));
+  return quo_var_new_obj(quo_str_new_interned(m, type_str, -1));
 }
 // Print the values of the given arguments. Separate values with spaces and print a newline at the end.
 static QuoVar quo__builtin_print(QuoModule *m, int argc, QuoVar *argv) {
@@ -1436,7 +1450,7 @@ static QuoVar quo__builtin_input(QuoModule *m, int argc, QuoVar *argv) {
   }
   // Remove trailing newline if present
   if (read > 0 && line[read - 1] == '\n') line[--read] = '\0';
-  QuoStr *str = quo_str_new(m, line, read);
+  QuoStr *str = quo_str_new_tmp(line, read);
   free(line);
   return quo_var_new_obj(str);
 }
@@ -1474,7 +1488,7 @@ static QuoVar quo__str_method_get(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2) return quo_var_new_err("get() requires index argument");
   if (!quo_var_is_num(&argv[1])) return quo_var_new_err("Index must be a number");
   QuoStr *str = quo_var_as_str(&argv[0]);
-  if (str->char_len == 0) return quo_var_new_obj(quo_str_new(m, "", 0));
+  if (str->char_len == 0) return quo_var_new_obj(quo_str_new_interned(m, "", 0));
   int index = (int)argv[1].val_num;
   if (index > str->char_len) return quo_var_new_err("Index out of range");
   if (index < 0) {
@@ -1484,7 +1498,7 @@ static QuoVar quo__str_method_get(QuoModule *m, int argc, QuoVar *argv) {
   }
   const char *pos = quo__utf8_index(str->data, str->len, index);
   int char_len = quo__utf8_char_len((unsigned char)*pos);
-  return quo_var_new_obj(quo_str_new(m, pos, char_len));
+  return quo_var_new_obj(quo_str_new_tmp(pos, char_len));
 }
 // Strip whitespace
 static QuoVar quo__str_method_strip(QuoModule *m, int argc, QuoVar *argv) {
@@ -1494,7 +1508,7 @@ static QuoVar quo__str_method_strip(QuoModule *m, int argc, QuoVar *argv) {
   const char *end = str->data + str->len;
   while (start < end && quo__is_space(*start)) start++;
   while (end > start && quo__is_space(*(end - 1))) end--;
-  return quo_var_new_obj(quo_str_new(m, start, end - start));
+  return quo_var_new_obj(quo_str_new_tmp(start, end - start));
 }
 // Check if string starts with prefix
 static QuoVar quo__str_method_startswith(QuoModule *m, int argc, QuoVar *argv) {
@@ -1533,18 +1547,18 @@ static QuoVar quo__str_method_split(QuoModule *m, int argc, QuoVar *argv) {
     for (int i = 0; i < str->char_len; i++) {
       const char *ch = quo__utf8_index(str->data, str->len, i);
       int ch_len = quo__utf8_char_len((unsigned char)*ch);
-      quo_arr_push(arr, quo_var_new_obj(quo_str_new(m, ch, ch_len)));
+      quo_arr_push(arr, quo_var_new_obj(quo_str_new_tmp(ch, ch_len)));
     }
   } else {
     const char *start = str->data;
     for (int i = 0; i <= str->len - delim->len; i++) {
       if (memcmp(str->data + i, delim->data, delim->len) == 0) {
-        quo_arr_push(arr, quo_var_new_obj(quo_str_new(m, start, str->data + i - start)));
+        quo_arr_push(arr, quo_var_new_obj(quo_str_new_tmp(start, str->data + i - start)));
         start = str->data + i + delim->len;
         i += delim->len - 1;
       }
     }
-    quo_arr_push(arr, quo_var_new_obj(quo_str_new(m, start, str->data + str->len - start)));
+    quo_arr_push(arr, quo_var_new_obj(quo_str_new_tmp(start, str->data + str->len - start)));
   }
   return quo_var_new_obj(arr);
 }
@@ -1568,7 +1582,7 @@ static QuoVar quo__str_method_replace(QuoModule *m, int argc, QuoVar *argv) {
     }
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new_tmp(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
@@ -1735,7 +1749,7 @@ QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_p
   quo__register_builtin_method(m, &m->dict_methods, "keys", quo__dict_method_keys);
   quo__register_builtin_method(m, &m->dict_methods, "values", quo__dict_method_values);
 
-  m->name = quo_str_new(m, file_path, -1);
+  m->name = quo_str_new_interned(m, file_path, -1);
   if (parent) {
     m->parent = parent;
     QuoVar var = quo_var_new_obj(m);
@@ -1775,7 +1789,7 @@ void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCF
 QuoObj *quo_module_register_type(QuoModule *m, const char *name, int name_len, size_t size) {
   QuoObj *obj = quo_obj_new(size);
   obj->type = QUO_OBJ_TYPE_USER;
-  obj->name = quo_str_new(m, name, name_len);
+  obj->name = quo_str_new_interned(m, name, name_len);
   obj->dict = quo_dict_new();
   QuoVar obj_var = quo_var_new_obj(obj);
   quo_ht_set(&m->types, obj->name, &obj_var);
@@ -1784,7 +1798,7 @@ QuoObj *quo_module_register_type(QuoModule *m, const char *name, int name_len, s
 
 QuoObj *quo_module_get_type_instance(QuoModule *m, const char *name, int name_len) {
   QuoVar var;
-  if (quo_ht_get(&m->types, quo_str_new(m, name, name_len), &var)) {
+  if (quo_ht_get(&m->types, quo_str_new_interned(m, name, name_len), &var)) {
     QuoObj *obj = quo_var_as_obj(&var);
     QuoObj *instance = quo_obj_new(obj->size);
     memcpy(instance, obj, obj->size);
@@ -1854,11 +1868,11 @@ QuoVar quo_var_to_str(QuoModule *m, QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_ERROR:
   case QUO_VAR_TYPE_NIL: break;
-  case QUO_VAR_TYPE_BOOL: return quo_var_new_obj(quo_str_new(m, v->val_num ? "true" : "false", -1));
+  case QUO_VAR_TYPE_BOOL: return quo_var_new_obj(quo_str_new_tmp(v->val_num ? "true" : "false", -1));
   case QUO_VAR_TYPE_NUM: {
     char buf[318];
     snprintf(buf, sizeof(buf), "%g", v->val_num);
-    return quo_var_new_obj(quo_str_new(m, buf, -1));
+    return quo_var_new_obj(quo_str_new_tmp(buf, -1));
   }
   case QUO_VAR_TYPE_OBJ:
     switch (v->val_obj->type) {
@@ -1868,10 +1882,10 @@ QuoVar quo_var_to_str(QuoModule *m, QuoVar *v) {
     case QUO_OBJ_TYPE_DICT:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_FN:
-    case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new(m, "", 0));
+    case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new_interned(m, "", 0));
     }
   }
-  return quo_var_new_obj(quo_str_new(m, "", 0));
+  return quo_var_new_obj(quo_str_new_interned(m, "", 0));
 }
 
 // --- MATH FUNCTIONS --- //
@@ -1882,7 +1896,7 @@ QuoVar quo_var_add(QuoModule *m, QuoVar *a, QuoVar *b) {
     const QuoVar str_a = quo_var_to_str(m, a);
     const QuoVar str_b = quo_var_to_str(m, b);
     char *str = quo_strdupf("%s%s", quo_obj_as_str(str_a.val_obj)->data, quo_obj_as_str(str_b.val_obj)->data);
-    QuoStr *res = quo_str_new(m, str, -1);
+    QuoStr *res = quo_str_new_tmp(str, -1);
     quo_dealloc(str);
     return quo_var_new_obj(res);
   }
@@ -1907,13 +1921,13 @@ QuoVar quo_var_mul(QuoModule *m, QuoVar *a, QuoVar *b) {
   if ((quo_var_is_str(a) && quo_var_is_num(b)) || (quo_var_is_num(a) && quo_var_is_str(b))) {
     QuoVar *num_var = quo_var_is_num(a) ? a : b;
     QuoVar *str_var = quo_var_is_str(a) ? a : b;
-    if (num_var->val_num <= 0) return quo_var_new_obj(quo_str_new(m, "", 0));
+    if (num_var->val_num <= 0) return quo_var_new_obj(quo_str_new_tmp("", 0));
     QuoStr *str = quo_var_as_str(str_var);
     int len = str->len * num_var->val_num;
     char *data = quo_alloc(NULL, len + 1);
     for (int i = 0; i < (int)num_var->val_num; i++) memcpy(data + (i * str->len), str->data, str->len);
     data[len] = '\0';
-    QuoStr *string = quo_str_new(m, data, -1);
+    QuoStr *string = quo_str_new_tmp(data, -1);
     quo_dealloc(data);
     return quo_var_new_obj(string);
   }
@@ -1950,46 +1964,40 @@ QuoVar quo_var_not(QuoVar *a) {
   return quo_var_new_err("Type don't support logical negation");
 }
 
-bool quo_var_eq(QuoVar *a, QuoVar *b) {
+static inline bool quo_var_eq(QuoVar *a, QuoVar *b) {
+  // Fast path: both numbers
   if (quo_var_is_num(a) && quo_var_is_num(b)) return a->val_num == b->val_num;
-  if (quo_var_is_str(a) || quo_var_is_str(b)) {
-    if (quo_var_is_str(a) && quo_var_is_str(b)) {
-      QuoStr *str_a = quo_var_as_str(a);
-      QuoStr *str_b = quo_var_as_str(b);
-      return str_a == str_b || str_a->hash == str_b->hash || (str_a->len == str_b->len && strcmp(str_a->data, str_b->data) == 0);
-    }
-    return quo_var_to_bool(a).val_num == quo_var_to_bool(b).val_num;
+  // Fast path: both strings
+  if (quo_var_is_str(a) && quo_var_is_str(b)) {
+    QuoStr *str_a = quo_var_as_str(a);
+    QuoStr *str_b = quo_var_as_str(b);
+    // Quick checks first
+    if (str_a == str_b) return true;              // Same pointer (interned)
+    if (str_a->hash != str_b->hash) return false; // Different hash = different strings
+    if (str_a->len != str_b->len) return false;   // Different length = different strings
+    // Same hash and length, must compare content
+    return memcmp(str_a->data, str_b->data, str_a->len) == 0;
   }
+  // Mixed string comparison (string vs non-string)
+  if (quo_var_is_str(a) || quo_var_is_str(b)) return quo_var_to_bool(a).val_num == quo_var_to_bool(b).val_num;
+  // Boolean/nil comparison
   if ((quo_var_is_bool(a) || quo_var_is_bool(b)) || (quo_var_is_nil(a) || quo_var_is_nil(b)))
     return quo_var_to_bool(a).val_num == quo_var_to_bool(b).val_num;
+  // Different types
   if (a->type != b->type) return false;
+  // Same type comparison
   switch (a->type) {
   case QUO_VAR_TYPE_ERROR: return a->val_err == b->val_err;
-  case QUO_VAR_TYPE_NIL:
-  case QUO_VAR_TYPE_BOOL:
-  case QUO_VAR_TYPE_NUM: break;
-  case QUO_VAR_TYPE_OBJ:
-    switch (a->val_obj->type) {
-    case QUO_OBJ_TYPE_CFN: return quo_obj_as_cfn(a->val_obj)->name == quo_obj_as_cfn(b->val_obj)->name;
-    case QUO_OBJ_TYPE_FN: return quo_obj_as_cfn(a->val_obj)->name == quo_obj_as_cfn(b->val_obj)->name;
-    case QUO_OBJ_TYPE_MODULE:
-    case QUO_OBJ_TYPE_STR:
-    case QUO_OBJ_TYPE_ARR:
-    case QUO_OBJ_TYPE_USER:
-    case QUO_OBJ_TYPE_DICT: return false;
-    }
+  case QUO_VAR_TYPE_NIL: return true;
+  case QUO_VAR_TYPE_BOOL: return a->val_num == b->val_num;
+  case QUO_VAR_TYPE_NUM: return a->val_num == b->val_num;
+  case QUO_VAR_TYPE_OBJ: return a->val_obj == b->val_obj;
   }
   return false;
 }
 
-int quo_var_cmp(QuoVar *a, QuoVar *b) {
+static inline int quo_var_cmp(QuoVar *a, QuoVar *b) {
   if (quo_var_is_num(a) && quo_var_is_num(b)) return a->val_num - b->val_num;
-  if (quo_var_is_str(a) || quo_var_is_str(b)) {
-    if (quo_var_is_str(a) && quo_var_is_str(b)) return a->val_obj == b->val_obj;
-    const double a_val = quo_var_is_num(a) ? a->val_num : quo_obj_as_str(a->val_obj)->len;
-    const double b_val = quo_var_is_num(b) ? b->val_num : quo_obj_as_str(b->val_obj)->len;
-    return a_val - b_val;
-  }
   if (quo_var_is_str(a) && quo_var_is_str(b)) return quo_obj_as_str(a->val_obj)->len - quo_obj_as_str(b->val_obj)->len;
   return 0;
 }
@@ -2435,7 +2443,7 @@ static QuoExpr *quo__parser_ternary_expr(QuoModule *m, QuoExpr *condition) {
 
 static QuoExpr *quo__parser_id(QuoModule *m) {
   if (!quo__parser_is_declared(m, m->previous)) {
-    QuoStr *key = quo_str_new(m, m->previous.start, m->previous.len);
+    QuoStr *key = quo_str_new_interned(m, m->previous.start, m->previous.len);
     QuoVar value;
     if (quo_ht_get(&m->globals, key, &value)) return quo__parser_variable(m);
     quo__parser_error(m, m->previous, "Undefined variable '" QUO_TOKEN_FMT "'", QUO_TOKEN_ARG(m->previous));
@@ -2665,7 +2673,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
     case QUO_TT_FALSE: constant = quo_var_new_bool(false); break;
     case QUO_TT_NIL: constant = quo_var_new_nil(); break;
     case QUO_TT_LITERAL_NUM: constant = quo_var_new_num(quo_strtod(e->token.start, e->token.len)); break;
-    case QUO_TT_LITERAL_STR: constant = quo_var_new_obj(quo_str_new(c->m, e->token.start, e->token.len)); break;
+    case QUO_TT_LITERAL_STR: constant = quo_var_new_obj(quo_str_new_interned(c->m, e->token.start, e->token.len)); break;
     default: break;
     }
     int index = quo__function_push_constant(c->fn, &constant);
@@ -2701,7 +2709,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
       quo__function_push_instruction(c->fn, idx);
     } else {
       // Treat as global - VM will error if undefined
-      QuoVar name_var = quo_var_new_obj(quo_str_new(c->m, e->token.start, e->token.len));
+      QuoVar name_var = quo_var_new_obj(quo_str_new_interned(c->m, e->token.start, e->token.len));
       int name_idx = quo__function_push_constant(c->fn, &name_var);
       quo__function_push_instruction(c->fn, QUO_OP_GET_GLOBAL);
       quo__function_push_instruction(c->fn, name_idx);
@@ -2785,7 +2793,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
       // Method call: obj.method(args)
       quo__compiler_expr(c, e->call.callee->member_access.object);
       QuoVar method_name =
-          quo_var_new_obj(quo_str_new(c->m, e->call.callee->member_access.member.start, e->call.callee->member_access.member.len));
+          quo_var_new_obj(quo_str_new_interned(c->m, e->call.callee->member_access.member.start, e->call.callee->member_access.member.len));
       int name_idx = quo__function_push_constant(c->fn, &method_name);
       quo__function_push_instruction(c->fn, QUO_OP_CONSTANT);
       quo__function_push_instruction(c->fn, name_idx);
@@ -2809,8 +2817,8 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
       // Compile: push dict, push field name, push value
       quo__compiler_expr(c, e->assign.target->member_access.object);
 
-      QuoVar field_name =
-          quo_var_new_obj(quo_str_new(c->m, e->assign.target->member_access.member.start, e->assign.target->member_access.member.len));
+      QuoVar field_name = quo_var_new_obj(
+          quo_str_new_interned(c->m, e->assign.target->member_access.member.start, e->assign.target->member_access.member.len));
       int name_idx = quo__function_push_constant(c->fn, &field_name);
       quo__function_push_instruction(c->fn, QUO_OP_CONSTANT);
       quo__function_push_instruction(c->fn, name_idx);
@@ -2846,7 +2854,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
         quo__function_push_instruction(c->fn, QUO_OP_SET_LOCAL);
         quo__function_push_instruction(c->fn, idx);
       } else {
-        QuoStr *name = quo_str_new(c->m, e->assign.target->token.start, e->assign.target->token.len);
+        QuoStr *name = quo_str_new_interned(c->m, e->assign.target->token.start, e->assign.target->token.len);
         QuoVar name_var = quo_var_new_obj(name);
         int name_idx = quo__function_push_constant(c->fn, &name_var);
         quo__function_push_instruction(c->fn, QUO_OP_SET_GLOBAL);
@@ -2877,7 +2885,7 @@ static void quo__compiler_expr(QuoCompiler *c, QuoExpr *e) {
     // Compile the object
     quo__compiler_expr(c, e->member_access.object);
     // Push method name as string constant
-    QuoVar field_name = quo_var_new_obj(quo_str_new(c->m, e->member_access.member.start, e->member_access.member.len));
+    QuoVar field_name = quo_var_new_obj(quo_str_new_interned(c->m, e->member_access.member.start, e->member_access.member.len));
     int name_idx = quo__function_push_constant(c->fn, &field_name);
     quo__function_push_instruction(c->fn, QUO_OP_CONSTANT);
     quo__function_push_instruction(c->fn, name_idx);
@@ -2907,7 +2915,7 @@ static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
     if (c->scope_depth == 0) {
       // Global variable declaration
       da_add(&c->declared_globals, s->var_decl.name);
-      QuoVar name_var = quo_var_new_obj(quo_str_new(c->m, s->var_decl.name.start, s->var_decl.name.len));
+      QuoVar name_var = quo_var_new_obj(quo_str_new_interned(c->m, s->var_decl.name.start, s->var_decl.name.len));
       int name_idx = quo__function_push_constant(c->fn, &name_var);
       quo__function_push_instruction(c->fn, QUO_OP_SET_GLOBAL);
       quo__function_push_instruction(c->fn, name_idx);
@@ -2974,6 +2982,7 @@ static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
     if (s->loop.condition) {
       quo__compiler_expr(c, s->loop.condition);
       jump_to_end = quo__function_emit_jump(c->fn, QUO_OP_JUMP_IF_FALSE);
+      quo__function_push_instruction(c->fn, QUO_OP_POP);
     }
     // Compile the body
     quo__compiler_stmt(c, s->loop.body);

@@ -59,7 +59,7 @@ static QuoVar quo__mod_base64_encode_impl(QuoModule *m, const char *input, int l
     else da_add(&sb, '=');
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new_tmp(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
@@ -92,7 +92,7 @@ static QuoVar quo__mod_base64_decode_impl(QuoModule *m, const char *input, int l
     if (valid_sextets >= 4) da_add(&sb, triple & 0xFF);
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new_tmp(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }

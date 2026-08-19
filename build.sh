@@ -11,15 +11,16 @@ cmd() { echo "$@";"$@"; }
 
 # Build QUO CLI
 build() {
-    CFLAGS="-Wall -Wextra -g"
+    CFLAGS="-Wall -Wextra"
     for arg in "$@"; do
         case $arg in
-            release) CFLAGS="$CFLAGS -O3" ;;
-            debug) CFLAGS="$CFLAGS -DQUO_DEBUG" ;;
+            release) CFLAGS="$CFLAGS -O3 -DNDEBUG" ;;
+            debug) CFLAGS="$CFLAGS -DQUO_DEBUG -g" ;;
             sanitize) CFLAGS="$CFLAGS -fsanitize=address" ;;
+            gperf) CFLAGS="$CFLAGS -pg -O2" ;;
         esac
     done
-    cmd cc $CFLAGS -o quo cli/*.c
+    cmd gcc $CFLAGS -o quo cli/*.c
 }
 
 run() {
