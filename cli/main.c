@@ -44,15 +44,35 @@
 // }
 
 static int quo__run(const char *path) {
-  char *source = quo_read_file(path);
-  if (!source) {
-    fprintf(stderr, "Failed to read file: %s\n", path);
-    return 1;
+  char *source = NULL;
+  char *cwd = NULL;
+  char *display_path = NULL;
+
+  if (path == NULL) {
+    display_path = quo_strdup("<stdin>");
+    cwd = quo_strdup("./");
+    QuoStringBuilder sb = quo_sb_new();
+    char buffer[2048];
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), stdin)) > 0) quo_sb_append(&sb, buffer, bytes_read);
+    quo_sb_null_terminate(&sb);
+    source = quo_strdup(quo_sb_string(&sb));
+    quo_sb_free(&sb);
+  } else {
+    source = quo_read_file(path);
+    if (!source) {
+      fprintf(stderr, "Failed to read file: %s\n", path);
+      return 1;
+    }
+    display_path = quo_strdup(path);
+    cwd = quo_dirname(path);
   }
-  char *cwd = quo_dirname(path);
-  QuoModule *m = quo_module_new(NULL, cwd, path, source, NULL);
+
+  QuoModule *m = quo_module_new(NULL, cwd, display_path, source, NULL);
   quo_dealloc(source);
   quo_dealloc(cwd);
+  quo_dealloc(display_path);
+
   // If module is NULL, there was compilation error.
   if (!m) return 1;
 
@@ -77,7 +97,6 @@ static int quo__run(const char *path) {
   } else if (quo_var_is_num(&result)) exit_code = (int)result.val_num;
   quo_var_unref(&result);
   quo_obj_unref((QuoObj *)m);
-  // quo_vm_free(vm);
 
   return exit_code;
 }
@@ -92,8 +111,12 @@ static void quo__print_help(const char *bin) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    quo__print_help(argv[0]);
-    return 1;
+    // No arguments, try reading from stdin
+    if (!isatty(fileno(stdin))) return quo__run(NULL);
+    else {
+      quo__print_help(argv[0]);
+      return 1;
+    }
   }
   const char *arg = argv[1];
 
