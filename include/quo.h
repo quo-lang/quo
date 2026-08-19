@@ -1929,7 +1929,7 @@ int quo_var_print(QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_NIL: return printf("nil");
   case QUO_VAR_TYPE_BOOL: return printf(v->val_num ? "true" : "false");
-  case QUO_VAR_TYPE_NUM: return printf("%g", v->val_num);
+  case QUO_VAR_TYPE_NUM: return printf("%.15g", v->val_num);
   case QUO_VAR_TYPE_ERROR: return printf("<error %s>", v->val_err);
   case QUO_VAR_TYPE_OBJ: {
     switch (v->val_obj->type) {
