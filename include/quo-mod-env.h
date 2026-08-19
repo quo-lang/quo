@@ -41,9 +41,10 @@ extern "C" {
 // ---------- PRIVATE API ---------- //
 
 static inline QuoVar quo__mod_env_get(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[1])) return quo_var_new_err("env.get() requires a string argument");
   const char *value = getenv(quo_var_as_str(&argv[1])->data);
-  return value ? quo_var_new_obj(quo_str_new(m, value, -1)) : quo_var_new_nil();
+  return value ? quo_var_new_obj(quo_str_new(value, -1)) : quo_var_new_nil();
 }
 
 static inline QuoVar quo__mod_env_set(QuoModule *m, int argc, QuoVar *argv) {
@@ -80,6 +81,7 @@ static inline QuoVar quo__mod_env_has(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_env_all(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   QUO_UNUSED(argc);
   QUO_UNUSED(argv);
   QuoDict *dict = quo_dict_new();
@@ -91,8 +93,8 @@ static inline QuoVar quo__mod_env_all(QuoModule *m, int argc, QuoVar *argv) {
       char *eq = strchr(p, '=');
       if (eq) {
         *eq = '\0';
-        QuoStr *key = quo_str_new(m, p, -1);
-        QuoVar val = quo_var_new_obj(quo_str_new(m, eq + 1, -1));
+        QuoStr *key = quo_str_new(p, -1);
+        QuoVar val = quo_var_new_obj(quo_str_new(eq + 1, -1));
         quo_dict_set(dict, key, &val);
         *eq = '=';
       }
@@ -105,8 +107,8 @@ static inline QuoVar quo__mod_env_all(QuoModule *m, int argc, QuoVar *argv) {
   for (char **env = environ; *env; env++) {
     char *eq = strchr(*env, '=');
     if (eq) {
-      QuoStr *key = quo_str_new(m, *env, eq - *env);
-      QuoVar val = quo_var_new_obj(quo_str_new(m, eq + 1, -1));
+      QuoStr *key = quo_str_new(*env, eq - *env);
+      QuoVar val = quo_var_new_obj(quo_str_new(eq + 1, -1));
       quo_dict_set(dict, key, &val);
     }
   }

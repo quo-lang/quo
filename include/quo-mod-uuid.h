@@ -106,6 +106,7 @@ static const char *quo__uuid_variant(unsigned char *bytes) {
 // ---------- PRIVATE API ---------- //
 
 static inline QuoVar quo__mod_uuid_v4(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   QUO_UNUSED(argc);
   QUO_UNUSED(argv);
   unsigned char bytes[16];
@@ -114,10 +115,11 @@ static inline QuoVar quo__mod_uuid_v4(QuoModule *m, int argc, QuoVar *argv) {
   bytes[8] = (bytes[8] & 0x3F) | 0x80;
   char str[37];
   quo__uuid_format(str, bytes);
-  return quo_var_new_obj(quo_str_new(m, str, -1));
+  return quo_var_new_obj(quo_str_new(str, -1));
 }
 
 static inline QuoVar quo__mod_uuid_v7(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   QUO_UNUSED(argc);
   QUO_UNUSED(argv);
   unsigned char bytes[16];
@@ -133,28 +135,29 @@ static inline QuoVar quo__mod_uuid_v7(QuoModule *m, int argc, QuoVar *argv) {
   bytes[8] = (bytes[8] & 0x3F) | 0x80;
   char str[37];
   quo__uuid_format(str, bytes);
-  return quo_var_new_obj(quo_str_new(m, str, -1));
+  return quo_var_new_obj(quo_str_new(str, -1));
 }
 
 static inline QuoVar quo__mod_uuid_parse(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("uuid.parse() requires a string argument");
   unsigned char bytes[16];
   if (!quo__uuid_parse_bytes(quo_var_as_str(&argv[0])->data, bytes)) {
     QuoDict *result = quo_dict_new();
-    QuoStr *key = quo_str_new(m, "valid", -1);
+    QuoStr *key = quo_str_new("valid", -1);
     QuoVar val = quo_var_new_bool(false);
     quo_dict_set(result, key, &val);
     return quo_var_new_obj(result);
   }
   QuoDict *result = quo_dict_new();
-  QuoStr *key_valid = quo_str_new(m, "valid", -1);
+  QuoStr *key_valid = quo_str_new("valid", -1);
   QuoVar val_valid = quo_var_new_bool(true);
   quo_dict_set(result, key_valid, &val_valid);
-  QuoStr *key_version = quo_str_new(m, "version", -1);
+  QuoStr *key_version = quo_str_new("version", -1);
   QuoVar val_version = quo_var_new_num(quo__uuid_version(bytes));
   quo_dict_set(result, key_version, &val_version);
-  QuoStr *key_variant = quo_str_new(m, "variant", -1);
-  QuoVar val_variant = quo_var_new_obj(quo_str_new(m, quo__uuid_variant(bytes), -1));
+  QuoStr *key_variant = quo_str_new("variant", -1);
+  QuoVar val_variant = quo_var_new_obj(quo_str_new(quo__uuid_variant(bytes), -1));
   quo_dict_set(result, key_variant, &val_variant);
   return quo_var_new_obj(result);
 }

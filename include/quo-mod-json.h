@@ -88,7 +88,7 @@ static QuoVar quo__json_parse_string(quo__json_parser *p) {
     return quo_var_new_err("Unterminated string");
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *str = quo_str_new(p->m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *str = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(str);
 }
@@ -309,11 +309,12 @@ static inline QuoVar quo__mod_json_decode(QuoModule *m, int argc, QuoVar *argv) 
 }
 
 static inline QuoVar quo__mod_json_encode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("json.encode() requires one argument");
   QuoStringBuilder sb = quo_sb_new();
   quo__json_stringify_value(&sb, &argv[0]);
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }

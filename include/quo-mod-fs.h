@@ -109,50 +109,52 @@ static inline QuoVar quo__mod_fs_exists(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_stat(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.stat() requires a path string");
 #ifdef _WIN32
   WIN32_FILE_ATTRIBUTE_DATA attrs;
   if (!GetFileAttributesEx(quo_var_as_str(&argv[0])->data, GetFileExInfoStandard, &attrs)) {
     QuoObj *result = quo_dict_new();
-    QuoVar key = quo_var_new_obj(quo_str_new(m, "exists", -1));
+    QuoVar key = quo_var_new_obj(quo_str_new("exists", -1));
     QuoVar val = quo_var_new_bool(false);
     quo_dict_set(result, quo_var_as_obj(&key), &val);
     return quo_var_new_obj(result);
   }
   QuoObj *result = quo_dict_new();
   // exists: true
-  quo_dict_set(result, quo_str_new(m, "exists", -1), &quo_var_new_bool(true));
+  quo_dict_set(result, quo_str_new("exists", -1), &quo_var_new_bool(true));
   // is_dir
   bool is_dir = (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-  quo_dict_set(result, quo_str_new(m, "is_dir", -1), &quo_var_new_bool(is_dir));
+  quo_dict_set(result, quo_str_new("is_dir", -1), &quo_var_new_bool(is_dir));
   // is_file
-  quo_dict_set(result, quo_str_new(m, "is_file", -1), &quo_var_new_bool(!is_dir));
+  quo_dict_set(result, quo_str_new("is_file", -1), &quo_var_new_bool(!is_dir));
   // size
   uint64_t size = ((uint64_t)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
-  quo_dict_set(result, quo_str_new(m, "size", -1), &quo_var_new_int((int64_t)size));
+  quo_dict_set(result, quo_str_new("size", -1), &quo_var_new_int((int64_t)size));
   // modified
   uint64_t timestamp = ((uint64_t)attrs.ftLastWriteTime.dwHighDateTime << 32) | attrs.ftLastWriteTime.dwLowDateTime;
   timestamp = (timestamp / 10000000) - 11644473600ULL;
-  quo_dict_set(result, quo_str_new(m, "modified", -1), &quo_var_new_int((int64_t)timestamp));
+  quo_dict_set(result, quo_str_new("modified", -1), &quo_var_new_int((int64_t)timestamp));
   return quo_var_new_obj(result);
 #else
   struct stat st;
   if (stat(quo_var_as_str(&argv[0])->data, &st) != 0) {
     QuoDict *result = quo_dict_new();
-    quo_dict_set(result, quo_str_new(m, "exists", -1), &quo_var_new_bool(false));
+    quo_dict_set(result, quo_str_new("exists", -1), &quo_var_new_bool(false));
     return quo_var_new_obj(result);
   }
   QuoDict *result = quo_dict_new();
-  quo_dict_set(result, quo_str_new(m, "exists", -1), &quo_var_new_bool(true));
-  quo_dict_set(result, quo_str_new(m, "is_dir", -1), &quo_var_new_bool(S_ISDIR(st.st_mode)));
-  quo_dict_set(result, quo_str_new(m, "is_file", -1), &quo_var_new_bool(S_ISREG(st.st_mode)));
-  quo_dict_set(result, quo_str_new(m, "size", -1), &quo_var_new_num(st.st_size));
-  quo_dict_set(result, quo_str_new(m, "modified", -1), &quo_var_new_num(st.st_mtime));
+  quo_dict_set(result, quo_str_new("exists", -1), &quo_var_new_bool(true));
+  quo_dict_set(result, quo_str_new("is_dir", -1), &quo_var_new_bool(S_ISDIR(st.st_mode)));
+  quo_dict_set(result, quo_str_new("is_file", -1), &quo_var_new_bool(S_ISREG(st.st_mode)));
+  quo_dict_set(result, quo_str_new("size", -1), &quo_var_new_num(st.st_size));
+  quo_dict_set(result, quo_str_new("modified", -1), &quo_var_new_num(st.st_mtime));
   return quo_var_new_obj(result);
 #endif
 }
 
 static inline QuoVar quo__mod_fs_ls(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.ls() requires a path string");
   QuoArr *arr = quo_arr_new();
 #ifdef _WIN32
@@ -179,7 +181,7 @@ static inline QuoVar quo__mod_fs_ls(QuoModule *m, int argc, QuoVar *argv) {
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL)
     if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
-      quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(m, entry->d_name, -1)));
+      quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(entry->d_name, -1)));
   closedir(dir);
 #endif
   return quo_var_new_obj(arr);
@@ -280,11 +282,12 @@ static inline QuoVar quo__mod_fs_cp(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_cwd(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   QUO_UNUSED(argc);
   QUO_UNUSED(argv);
   char buf[4096];
   if (!getcwd(buf, sizeof(buf))) return quo_var_new_err("Failed to get current directory");
-  return quo_var_new_obj(quo_str_new(m, buf, -1));
+  return quo_var_new_obj(quo_str_new(buf, -1));
 }
 
 static inline QuoVar quo__mod_fs_cd(QuoModule *m, int argc, QuoVar *argv) {
@@ -295,6 +298,7 @@ static inline QuoVar quo__mod_fs_cd(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_get_tmp_dir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   QUO_UNUSED(argc);
   QUO_UNUSED(argv);
 #ifdef _WIN32
@@ -305,7 +309,7 @@ static inline QuoVar quo__mod_fs_get_tmp_dir(QuoModule *m, int argc, QuoVar *arg
   if (!tmp) tmp = "/tmp";
   const char *buf = tmp;
 #endif
-  return quo_var_new_obj(quo_str_new(m, buf, -1));
+  return quo_var_new_obj(quo_str_new(buf, -1));
 }
 
 // --- QuoFSFile --- //
@@ -330,11 +334,12 @@ static inline QuoVar quo__mod_fs_get_path(QuoModule *m, int argc, QuoVar *argv) 
 }
 
 static inline QuoVar quo__mod_fs_read(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("read() has no arguments");
   QuoFSFile *file = quo_var_as_fs_file(&argv[0]);
   char *content = quo_read_file(file->path->data);
   if (!content) return quo_var_new_err("Failed to read file");
-  QuoStr *result = quo_str_new_raw(m, content, -1);
+  QuoStr *result = quo_str_new_raw(content, -1);
   quo_dealloc(content);
   return quo_var_new_obj(result);
 }
@@ -347,6 +352,7 @@ static inline QuoVar quo__mod_fs_write(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_fs_read_lines(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("read_lines() has no arguments");
   QuoFSFile *file = quo_var_as_fs_file(&argv[0]);
   char *content = quo_read_file(file->path->data);
@@ -357,7 +363,7 @@ static inline QuoVar quo__mod_fs_read_lines(QuoModule *m, int argc, QuoVar *argv
     // Remove trailing \r if present
     size_t len = strlen(line);
     if (len > 0 && line[len - 1] == '\r') line[len - 1] = '\0';
-    quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(m, line, -1)));
+    quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(line, -1)));
     line = strtok(NULL, "\n");
   }
   quo_dealloc(content);

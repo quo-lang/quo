@@ -45,7 +45,7 @@ static QuoVar quo__mod_os_name(QuoModule *m, int argc, QuoVar *argv) {
 #else
   os_name = "unknown";
 #endif
-  return quo_var_new_obj(quo_str_new(m, os_name, -1));
+  return quo_var_new_obj(quo_str_new(os_name, -1));
 }
 
 // ---------- PUBLIC API ---------- //

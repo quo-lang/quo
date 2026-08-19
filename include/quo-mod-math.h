@@ -401,9 +401,9 @@ static inline bool quo_mod_math_init(QuoModule *parent) {
   quo_module_register_cfn(m, "deg_to_rad", -1, quo__mod_math_deg_to_rad);
   quo_module_register_cfn(m, "rad_to_deg", -1, quo__mod_math_rad_to_deg);
 
-  quo_module_register_var(m, quo_str_new(m, "pi", -1), quo_var_new_num(3.1415926535897932384));
-  quo_module_register_var(m, quo_str_new(m, "e", -1), quo_var_new_num(2.7182818284590452354));
-  quo_module_register_var(m, quo_str_new(m, "tau", -1), quo_var_new_num(3.1415926535897932384 * 2));
+  quo_module_register_var(m, quo_str_new("pi", -1), quo_var_new_num(3.1415926535897932384));
+  quo_module_register_var(m, quo_str_new("e", -1), quo_var_new_num(2.7182818284590452354));
+  quo_module_register_var(m, quo_str_new("tau", -1), quo_var_new_num(3.1415926535897932384 * 2));
 
   return true;
 }

@@ -46,7 +46,7 @@ extern "C" {
 // ---------- PRIVATE API ---------- //
 
 // Parse a single CSV field, handling quoted fields
-static QuoVar quo__csv_parse_field(QuoModule *m, const char *str, int *pos, int len, char delimiter) {
+static QuoVar quo__csv_parse_field(const char *str, int *pos, int len, char delimiter) {
   QuoStringBuilder sb = quo_sb_new();
   int i = *pos;
   // Check for quoted field
@@ -80,14 +80,14 @@ static QuoVar quo__csv_parse_field(QuoModule *m, const char *str, int *pos, int 
     }
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   *pos = i;
   return quo_var_new_obj(result);
 }
 
 // Parse a single CSV line
-static QuoVar quo__csv_parse_line(QuoModule *m, const char *str, int *pos, int len, char delimiter) {
+static QuoVar quo__csv_parse_line(const char *str, int *pos, int len, char delimiter) {
   QuoArr *arr = quo_arr_new();
   int i = *pos;
   if (i >= len || (str[i] == '\n' || str[i] == '\r')) {
@@ -95,7 +95,7 @@ static QuoVar quo__csv_parse_line(QuoModule *m, const char *str, int *pos, int l
     return quo_var_new_obj(arr);
   }
   while (i < len && str[i] != '\n' && str[i] != '\r') {
-    QuoVar field = quo__csv_parse_field(m, str, &i, len, delimiter);
+    QuoVar field = quo__csv_parse_field(str, &i, len, delimiter);
     if (quo_var_is_err(&field)) {
       QuoVar obj = quo_var_new_obj(arr);
       quo_var_unref(&obj);
@@ -113,16 +113,16 @@ static QuoVar quo__csv_parse_line(QuoModule *m, const char *str, int *pos, int l
 }
 
 // Escape a field for CSV output
-static QuoVar quo__csv_escape_field(QuoModule *m, QuoVar *value) {
+static QuoVar quo__csv_escape_field(QuoVar *value) {
   const char *str;
   int len;
   if (quo_var_is_str(value)) {
     str = quo_var_as_str(value)->data;
     len = quo_var_as_str(value)->len;
-  } else if (quo_var_is_nil(value)) return quo_var_new_obj(quo_str_new(m, "", -1));
+  } else if (quo_var_is_nil(value)) return quo_var_new_obj(quo_str_new("", -1));
   else {
     // Convert to string
-    QuoVar str_val = quo_var_to_str(m, (QuoVar *)value);
+    QuoVar str_val = quo_var_to_str(value);
     str = quo_var_as_str(&str_val)->data;
     len = quo_var_as_str(&str_val)->len;
   }
@@ -141,12 +141,13 @@ static QuoVar quo__csv_escape_field(QuoModule *m, QuoVar *value) {
     da_add(&sb, '"');
   } else quo_sb_append(&sb, str, len);
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
 
 static inline QuoVar quo__mod_csv_parse(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("csv.parse() requires a string argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
@@ -160,7 +161,7 @@ static inline QuoVar quo__mod_csv_parse(QuoModule *m, int argc, QuoVar *argv) {
       pos++;
       continue;
     }
-    QuoVar line = quo__csv_parse_line(m, str, &pos, len, delimiter);
+    QuoVar line = quo__csv_parse_line(str, &pos, len, delimiter);
     if (quo_var_is_err(&line)) {
       QuoVar obj = quo_var_new_obj(result);
       quo_var_unref(&obj);
@@ -173,6 +174,7 @@ static inline QuoVar quo__mod_csv_parse(QuoModule *m, int argc, QuoVar *argv) {
 }
 
 static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("csv.parse_dict() requires a string argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
@@ -180,7 +182,7 @@ static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int argc, QuoVar *arg
   int len = quo_var_as_str(&argv[0])->len;
   int pos = 0;
   // Parse header
-  QuoVar header_line = quo__csv_parse_line(m, str, &pos, len, delimiter);
+  QuoVar header_line = quo__csv_parse_line(str, &pos, len, delimiter);
   if (quo_var_is_err(&header_line)) return header_line;
   if (!quo_var_is_arr(&header_line) || quo_arr_len(quo_var_as_arr(&header_line)) == 0) return quo_var_new_err("CSV must have a header row");
   QuoArr *result = quo_arr_new();
@@ -189,7 +191,7 @@ static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int argc, QuoVar *arg
       pos++;
       continue;
     }
-    QuoVar line = quo__csv_parse_line(m, str, &pos, len, delimiter);
+    QuoVar line = quo__csv_parse_line(str, &pos, len, delimiter);
     if (quo_var_is_err(&line)) {
       QuoVar obj = quo_var_new_obj(result);
       quo_var_unref(&obj);
@@ -210,6 +212,7 @@ static inline QuoVar quo__mod_csv_parse_dict(QuoModule *m, int argc, QuoVar *arg
 }
 
 static inline QuoVar quo__mod_csv_stringify(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc < 1 || !quo_var_is_arr(&argv[0])) return quo_var_new_err("csv.stringify() requires an array argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
@@ -222,24 +225,25 @@ static inline QuoVar quo__mod_csv_stringify(QuoModule *m, int argc, QuoVar *argv
       for (int j = 0; j < quo_arr_len(row_arr); j++) {
         if (j > 0) da_add(&sb, delimiter);
         QuoVar field = quo_arr_get(row_arr, j);
-        QuoVar escaped = quo__csv_escape_field(m, &field);
+        QuoVar escaped = quo__csv_escape_field(&field);
         quo_sb_append(&sb, quo_var_as_str(&escaped)->data, quo_var_as_str(&escaped)->len);
       }
       da_add(&sb, '\n');
     }
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
 
 static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc < 1 || !quo_var_is_arr(&argv[0])) return quo_var_new_err("csv.stringify_dict() requires an array of dicts argument");
   char delimiter = ',';
   if (argc >= 2 && quo_var_is_str(&argv[1]) && quo_var_as_str(&argv[1])->len > 0) delimiter = quo_var_as_str(&argv[1])->data[0];
   QuoArr *arr = quo_var_as_arr(&argv[0]);
-  if (quo_arr_len(arr) == 0) return quo_var_new_obj(quo_str_new(m, "", -1));
+  if (quo_arr_len(arr) == 0) return quo_var_new_obj(quo_str_new("", -1));
   QuoStringBuilder sb = quo_sb_new();
   // Get headers from first record
   QuoVar first = quo_arr_get(arr, 0);
@@ -253,7 +257,7 @@ static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int argc, QuoVar 
   for (int i = 0; i < da_count(&headers); i++) {
     if (i > 0) da_add(&sb, delimiter);
     QuoVar header = quo_var_new_obj(headers.items[i]);
-    QuoVar escaped = quo__csv_escape_field(m, &header);
+    QuoVar escaped = quo__csv_escape_field(&header);
     quo_sb_append(&sb, quo_var_as_str(&escaped)->data, quo_var_as_str(&escaped)->len);
   }
   da_add(&sb, '\n');
@@ -264,14 +268,14 @@ static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int argc, QuoVar 
     for (int j = 0; j < da_count(&headers); j++) {
       if (j > 0) da_add(&sb, delimiter);
       QuoVar value = quo_dict_get(quo_var_as_dict(&row), headers.items[j]);
-      QuoVar escaped = quo__csv_escape_field(m, &value);
+      QuoVar escaped = quo__csv_escape_field(&value);
       quo_sb_append(&sb, quo_var_as_str(&escaped)->data, quo_var_as_str(&escaped)->len);
     }
     da_add(&sb, '\n');
   }
   da_free(&headers);
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new(m, quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }

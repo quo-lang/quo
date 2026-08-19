@@ -313,10 +313,10 @@ typedef struct QuoStr {
 // Creates a new interned QuoStr from a C string. Process escape sequences.
 // Pass `len` as `-1` for NULL-terminated strings.
 QuoStr *quo_str_new_interned(QuoModule *m, const char *str, int len);
-// Creates a new interned QuoStr from raw data (no escape processing).
-QuoStr *quo_str_new_interned_raw(QuoModule *m, const char *str, int len);
 // Create not interned string
-QuoStr *quo_str_new_tmp(const char *str, int len);
+QuoStr *quo_str_new(const char *str, int len);
+// Creates a new QuoStr from raw data (no escape processing).
+QuoStr *quo_str_new_raw(const char *str, int len);
 
 static inline QuoStr *quo_obj_as_str(const QuoObj *o) { return (QuoStr *)o; }
 
@@ -1205,24 +1205,42 @@ QuoStr *quo_str_new_interned(QuoModule *m, const char *str, int len) {
   return string;
 }
 
-QuoStr *quo_str_new_interned_raw(QuoModule *m, const char *str, int len) {
+QuoStr *quo_str_new(const char *str, int len) {
   if (len < 0) len = strlen(str);
-  int hash = quo_hash(str, len);
-  QuoStr *existing = quo__find_string(&m->string_table, str, len, hash);
-  if (existing) return existing;
-  // Create new string
+  // Process escape sequences
+  char *processed = quo_alloc(NULL, len + 1);
+  int out_len = 0;
+  for (int i = 0; i < len; i++) {
+    if (str[i] == '\\' && i + 1 < len) {
+      i++;
+      switch (str[i]) {
+      case 'n': processed[out_len++] = '\n'; break;
+      case 't': processed[out_len++] = '\t'; break;
+      case 'r': processed[out_len++] = '\r'; break;
+      case '\\': processed[out_len++] = '\\'; break;
+      case '"': processed[out_len++] = '"'; break;
+      case '0': processed[out_len++] = '\0'; break;
+      default:
+        processed[out_len++] = '\\';
+        processed[out_len++] = str[i];
+        break;
+      }
+    } else processed[out_len++] = str[i];
+  }
+  processed[out_len] = '\0';
+  int hash = quo_hash(processed, out_len);
+
   QuoStr *string = (QuoStr *)quo_obj_new(sizeof(QuoStr));
   string->obj.type = QUO_OBJ_TYPE_STR;
   string->data = quo_strndup(str, len);
   string->len = len;
   string->char_len = quo__utf8_strlen(str, len);
   string->hash = hash;
-  string->interned = true;
-  quo_ht_set(&m->string_table, string, &quo_var_new_nil());
+  string->interned = false;
   return string;
 }
 
-QuoStr *quo_str_new_tmp(const char *str, int len) {
+QuoStr *quo_str_new_raw(const char *str, int len) {
   if (len < 0) len = strlen(str);
   QuoStr *string = (QuoStr *)quo_obj_new(sizeof(QuoStr));
   string->obj.type = QUO_OBJ_TYPE_STR;
@@ -1429,6 +1447,7 @@ static QuoVar quo__builtin_print(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Read a line from stdin and return it as a string
 static QuoVar quo__builtin_input(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   // Optional prompt arguments
   for (int i = 0; i < argc; i++) quo_var_print(&argv[i]);
   // Read a line from stdin
@@ -1442,7 +1461,7 @@ static QuoVar quo__builtin_input(QuoModule *m, int argc, QuoVar *argv) {
   }
   // Remove trailing newline if present
   if (read > 0 && line[read - 1] == '\n') line[--read] = '\0';
-  QuoStr *str = quo_str_new_tmp(line, read);
+  QuoStr *str = quo_str_new(line, read);
   free(line);
   return quo_var_new_obj(str);
 }
@@ -1465,6 +1484,7 @@ static QuoVar quo__builtin_num(QuoModule *m, int argc, QuoVar *argv) {
   return quo_var_to_num(&argv[0]);
 }
 static QuoVar quo__builtin_str(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   QUO_UNUSED(argc);
   return quo_var_to_str(&argv[0]);
 }
@@ -1490,17 +1510,18 @@ static QuoVar quo__str_method_get(QuoModule *m, int argc, QuoVar *argv) {
   }
   const char *pos = quo__utf8_index(str->data, str->len, index);
   int char_len = quo__utf8_char_len((unsigned char)*pos);
-  return quo_var_new_obj(quo_str_new_tmp(pos, char_len));
+  return quo_var_new_obj(quo_str_new(pos, char_len));
 }
 // Strip whitespace
 static QuoVar quo__str_method_strip(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 1) return quo_var_new_err("strip() takes no arguments");
   QuoStr *str = quo_var_as_str(&argv[0]);
   const char *start = str->data;
   const char *end = str->data + str->len;
   while (start < end && quo__is_space(*start)) start++;
   while (end > start && quo__is_space(*(end - 1))) end--;
-  return quo_var_new_obj(quo_str_new_tmp(start, end - start));
+  return quo_var_new_obj(quo_str_new(start, end - start));
 }
 // Check if string starts with prefix
 static QuoVar quo__str_method_startswith(QuoModule *m, int argc, QuoVar *argv) {
@@ -1530,6 +1551,7 @@ static QuoVar quo__str_method_contains(QuoModule *m, int argc, QuoVar *argv) {
 }
 // Split string into array
 static QuoVar quo__str_method_split(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("split() requires a delimiter string");
   QuoStr *str = quo_var_as_str(&argv[0]);
   QuoStr *delim = quo_var_as_str(&argv[1]);
@@ -1539,23 +1561,24 @@ static QuoVar quo__str_method_split(QuoModule *m, int argc, QuoVar *argv) {
     for (int i = 0; i < str->char_len; i++) {
       const char *ch = quo__utf8_index(str->data, str->len, i);
       int ch_len = quo__utf8_char_len((unsigned char)*ch);
-      quo_arr_push(arr, quo_var_new_obj(quo_str_new_tmp(ch, ch_len)));
+      quo_arr_push(arr, quo_var_new_obj(quo_str_new(ch, ch_len)));
     }
   } else {
     const char *start = str->data;
     for (int i = 0; i <= str->len - delim->len; i++) {
       if (memcmp(str->data + i, delim->data, delim->len) == 0) {
-        quo_arr_push(arr, quo_var_new_obj(quo_str_new_tmp(start, str->data + i - start)));
+        quo_arr_push(arr, quo_var_new_obj(quo_str_new(start, str->data + i - start)));
         start = str->data + i + delim->len;
         i += delim->len - 1;
       }
     }
-    quo_arr_push(arr, quo_var_new_obj(quo_str_new_tmp(start, str->data + str->len - start)));
+    quo_arr_push(arr, quo_var_new_obj(quo_str_new(start, str->data + str->len - start)));
   }
   return quo_var_new_obj(arr);
 }
 // Replace substrings
 static QuoVar quo__str_method_replace(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 3 || !quo_var_is_str(&argv[1]) || !quo_var_is_str(&argv[2]))
     return quo_var_new_err("replace() requires two string arguments");
   QuoStr *str = quo_var_as_str(&argv[0]);
@@ -1574,7 +1597,7 @@ static QuoVar quo__str_method_replace(QuoModule *m, int argc, QuoVar *argv) {
     }
   }
   quo_sb_null_terminate(&sb);
-  QuoStr *result = quo_str_new_tmp(quo_sb_string(&sb), da_count(&sb) - 1);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
   quo_sb_free(&sb);
   return quo_var_new_obj(result);
 }
@@ -1860,11 +1883,11 @@ QuoVar quo_var_to_str(QuoVar *v) {
   switch (v->type) {
   case QUO_VAR_TYPE_ERROR:
   case QUO_VAR_TYPE_NIL: break;
-  case QUO_VAR_TYPE_BOOL: return quo_var_new_obj(quo_str_new_tmp(v->val_num ? "true" : "false", -1));
+  case QUO_VAR_TYPE_BOOL: return quo_var_new_obj(quo_str_new(v->val_num ? "true" : "false", -1));
   case QUO_VAR_TYPE_NUM: {
     char buf[318];
     snprintf(buf, sizeof(buf), "%g", v->val_num);
-    return quo_var_new_obj(quo_str_new_tmp(buf, -1));
+    return quo_var_new_obj(quo_str_new(buf, -1));
   }
   case QUO_VAR_TYPE_OBJ:
     switch (v->val_obj->type) {
@@ -1874,10 +1897,10 @@ QuoVar quo_var_to_str(QuoVar *v) {
     case QUO_OBJ_TYPE_DICT:
     case QUO_OBJ_TYPE_USER:
     case QUO_OBJ_TYPE_FN:
-    case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new_tmp("", 0));
+    case QUO_OBJ_TYPE_CFN: return quo_var_new_obj(quo_str_new("", 0));
     }
   }
-  return quo_var_new_obj(quo_str_new_tmp("", 0));
+  return quo_var_new_obj(quo_str_new("", 0));
 }
 
 static inline bool quo_var_eq(QuoVar *a, QuoVar *b) {
@@ -3129,7 +3152,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
         const QuoVar str_a = quo_var_to_str(a);
         const QuoVar str_b = quo_var_to_str(b);
         char *str = quo_strdupf("%s%s", quo_obj_as_str(str_a.val_obj)->data, quo_obj_as_str(str_b.val_obj)->data);
-        QuoStr *res = quo_str_new_tmp(str, -1);
+        QuoStr *res = quo_str_new(str, -1);
         quo_dealloc(str);
         result = quo_var_new_obj(res);
       } else if (quo_var_is_arr(a) && quo_var_is_arr(b)) {
@@ -3162,14 +3185,14 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       else if ((quo_var_is_str(a) && quo_var_is_num(b)) || (quo_var_is_num(a) && quo_var_is_str(b))) {
         QuoVar *num_var = quo_var_is_num(a) ? a : b;
         QuoVar *str_var = quo_var_is_str(a) ? a : b;
-        if (num_var->val_num <= 0) result = quo_var_new_obj(quo_str_new_tmp("", 0));
+        if (num_var->val_num <= 0) result = quo_var_new_obj(quo_str_new("", 0));
         else {
           QuoStr *str = quo_var_as_str(str_var);
           int len = str->len * num_var->val_num;
           char *data = quo_alloc(NULL, len + 1);
           for (int i = 0; i < (int)num_var->val_num; i++) memcpy(data + (i * str->len), str->data, str->len);
           data[len] = '\0';
-          QuoStr *string = quo_str_new_tmp(data, -1);
+          QuoStr *string = quo_str_new(data, -1);
           quo_dealloc(data);
           result = quo_var_new_obj(string);
         }
