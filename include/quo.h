@@ -2126,6 +2126,14 @@ static void quo__parser_declare_variable(QuoModule *m, QuoToken name) {
   da_add(current_scope, name);
 }
 
+static inline QuoStmt *quo__parser_wrap_stmt_in_block(QuoModule *m, QuoStmt *stmt) {
+  quo__parser_begin_scope(m);
+  QuoStmt *block_stmt = quo__stmt_new(QUO_STMT_BLOCK);
+  da_add(&block_stmt->block, stmt);
+  quo__parser_end_scope(m);
+  return block_stmt;
+}
+
 // --- PARSER EXPRESSIONS --- //
 
 static QuoExpr *quo__parser_literal(QuoModule *m);
@@ -2342,9 +2350,10 @@ static QuoExpr *quo__parser_fn_expr(QuoModule *m) {
   }
   quo__parser_expect(m, QUO_TT_CPAREN, "Expected ')' after parameters");
   // Body
+  QuoStmt *stmt = quo__parser_stmt(m);
   QuoExpr *expr = quo__expr_new(QUO_EXPR_FUNCTION, m->previous);
   expr->function.parameters = parameters;
-  expr->function.body = quo__parser_stmt(m);
+  expr->function.body = stmt->type != QUO_STMT_BLOCK ? quo__parser_wrap_stmt_in_block(m, stmt) : stmt;
   return expr;
 }
 
@@ -2549,32 +2558,15 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
   else if (quo__parser_match(m, QUO_TT_IF)) {
     QuoExpr *condition = quo__parser_expression(m);
     // Parse then branch - either block or single statement
-    QuoStmt *then_branch;
-    if (quo__parser_check(m, QUO_TT_OBRACE)) then_branch = quo__parser_stmt(m);
-    else {
-      // Single statement - wrap in a block
-      quo__parser_begin_scope(m);
-      QuoStmtList ast = {0};
-      QuoStmt *stmt = quo__parser_stmt(m);
-      if (stmt) da_add(&ast, stmt);
-      then_branch = quo__stmt_new(QUO_STMT_BLOCK);
-      then_branch->block = ast;
-      quo__parser_end_scope(m);
-    }
+    QuoStmt *then_stmt = quo__parser_stmt(m);
+    QuoStmt *then_branch = then_stmt->type != QUO_STMT_BLOCK ? quo__parser_wrap_stmt_in_block(m, then_stmt) : then_stmt;
     // Parse else branch (optional)
     QuoStmt *else_branch = NULL;
     if (quo__parser_match(m, QUO_TT_ELSE)) {
       if (quo__parser_check(m, QUO_TT_IF)) else_branch = quo__parser_stmt(m);
-      else if (quo__parser_check(m, QUO_TT_OBRACE)) else_branch = quo__parser_stmt(m);
       else {
-        // Single statement after else
-        quo__parser_begin_scope(m);
-        QuoStmtList ast = {0};
-        QuoStmt *stmt = quo__parser_stmt(m);
-        if (stmt) da_add(&ast, stmt);
-        else_branch = quo__stmt_new(QUO_STMT_BLOCK);
-        else_branch->block = ast;
-        quo__parser_end_scope(m);
+        QuoStmt *else_stmt = quo__parser_stmt(m);
+        else_branch = else_stmt->type != QUO_STMT_BLOCK ? quo__parser_wrap_stmt_in_block(m, else_stmt) : else_stmt;
       }
     }
     stmt = quo__stmt_new(QUO_STMT_IF);
@@ -2600,18 +2592,8 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
     if (!quo__parser_check(m, QUO_TT_CPAREN)) increment = quo__parser_stmt(m);
     quo__parser_expect(m, QUO_TT_CPAREN, "Expected ')' after loop clauses");
     // Parse body - either block or single statement
-    QuoStmt *body;
-    if (quo__parser_check(m, QUO_TT_OBRACE)) body = quo__parser_stmt(m);
-    else {
-      // Single statement - wrap in a block
-      quo__parser_begin_scope(m);
-      QuoStmtList ast = {0};
-      QuoStmt *stmt = quo__parser_stmt(m);
-      if (stmt) da_add(&ast, stmt);
-      body = quo__stmt_new(QUO_STMT_BLOCK);
-      body->block = ast;
-      quo__parser_end_scope(m);
-    }
+    QuoStmt *body_stmt = quo__parser_stmt(m);
+    QuoStmt *body = body_stmt->type != QUO_STMT_BLOCK ? quo__parser_wrap_stmt_in_block(m, body_stmt) : body_stmt;
     stmt = quo__stmt_new(QUO_STMT_LOOP);
     stmt->loop.initializer = initializer;
     stmt->loop.condition = condition;
