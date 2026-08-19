@@ -3162,15 +3162,17 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       else if ((quo_var_is_str(a) && quo_var_is_num(b)) || (quo_var_is_num(a) && quo_var_is_str(b))) {
         QuoVar *num_var = quo_var_is_num(a) ? a : b;
         QuoVar *str_var = quo_var_is_str(a) ? a : b;
-        if (num_var->val_num <= 0) return quo_var_new_obj(quo_str_new_tmp("", 0));
-        QuoStr *str = quo_var_as_str(str_var);
-        int len = str->len * num_var->val_num;
-        char *data = quo_alloc(NULL, len + 1);
-        for (int i = 0; i < (int)num_var->val_num; i++) memcpy(data + (i * str->len), str->data, str->len);
-        data[len] = '\0';
-        QuoStr *string = quo_str_new_tmp(data, -1);
-        quo_dealloc(data);
-        result = quo_var_new_obj(string);
+        if (num_var->val_num <= 0) result = quo_var_new_obj(quo_str_new_tmp("", 0));
+        else {
+          QuoStr *str = quo_var_as_str(str_var);
+          int len = str->len * num_var->val_num;
+          char *data = quo_alloc(NULL, len + 1);
+          for (int i = 0; i < (int)num_var->val_num; i++) memcpy(data + (i * str->len), str->data, str->len);
+          data[len] = '\0';
+          QuoStr *string = quo_str_new_tmp(data, -1);
+          quo_dealloc(data);
+          result = quo_var_new_obj(string);
+        }
       } else return quo_var_new_err("Types don't support multiplication");
       da_count(&vm->stack) -= 2;
       quo__vm_push(vm, result);
