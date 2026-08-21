@@ -2,8 +2,8 @@ name: Build Quo CLI
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*.*.*"
 
 jobs:
   build:
@@ -18,6 +18,6 @@ jobs:
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
-        if: github.ref_type == 'tag'
         with:
           files: quo
+          tag_name: ${{ github.ref_name }}
