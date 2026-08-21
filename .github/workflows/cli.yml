@@ -20,5 +20,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: quo
+          tag_name: latest
           prerelease: true
           make_latest: false
