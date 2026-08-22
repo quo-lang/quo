@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Build script for QUO project.
-# Run `./build.sh help` to see the build options.
+# Run `./build.sh` to see the options.
 
 # ---------- UTIL FUNCTIONS ---------- #
 
@@ -18,14 +18,12 @@ cmd() { echo "$@";"$@"; }
 build() {
     mkdir -p build
     CFLAGS="-Wall -Wextra"
-    for arg in "$@"; do
-        case $arg in
-            release) CFLAGS="$CFLAGS -O3 -DNDEBUG" ;;
-            debug) CFLAGS="$CFLAGS -DQUO_DEBUG -g" ;;
-            sanitize) CFLAGS="$CFLAGS -fsanitize=address" ;;
-            gperf) CFLAGS="$CFLAGS -pg -O2" ;;
-        esac
-    done
+    case $1 in
+        release) CFLAGS="$CFLAGS -O3 -DNDEBUG" ;;
+        debug) CFLAGS="$CFLAGS -DQUO_DEBUG -g" ;;
+        sanitize) CFLAGS="$CFLAGS -fsanitize=address" ;;
+        gperf) CFLAGS="$CFLAGS -pg -O2" ;;
+    esac
     cmd gcc $CFLAGS -o build/quo cli/*.c
 }
 
@@ -106,10 +104,11 @@ usage() {
     echo "Usage: $0 [option]"
     echo "Options:"
     echo "  build [options...]  Build the QUO cli (default)"
-    echo "                            Options (can be combined):"
-    echo "                              release   Optimized build"
-    echo "                              debug     Enable debug logs"
-    echo "                              sanitize  Enable address sanitizer"
+    echo "                      Options:"
+    echo "                        release   Optimized build"
+    echo "                        debug     Enable debug logs"
+    echo "                        sanitize  Enable address sanitizer"
+    echo "                        gperf     Enable GProf build"
     echo "  run                 Run the QUO cli on test.quo"
     echo "  dist                Create distribution archive"
     echo "  tag                 Manage git tags"
@@ -117,7 +116,6 @@ usage() {
     echo "  test                Run the QUO test suite"
     echo "  stats               Print statistics of quo.h"
     echo "  clean               Clean up build artifacts"
-    echo "  help                Show this help message"
     exit 1
 }
 
@@ -132,6 +130,5 @@ case ${1-} in
   test)    test  ;;
   stats)   stats ;;
   clean)   clean ;;
-  help)    usage ;;
   *)       usage ;;
 esac

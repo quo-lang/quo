@@ -1,7 +1,4 @@
-# Testing global and local variables, loop, if / else if / else.
-
-var utils = import("utils.quo")
-var assert = utils.assert
+var assert = fn(condition) if !condition exit(1)
 
 var fizz_count = 0
 var buzz_count = 0
