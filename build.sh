@@ -84,47 +84,66 @@ dist() {
 }
 
 tag() {
-    echo "Creating new tag"
-    echo "Latest tag: $(git describe --tags)"
-    printf "Enter new version (e.g 0.0.0): "
-    read tag
-    git tag -a $tag -m "Release $tag"
-    git push origin $tag
+    echo "=== Manage git tags ==="
+    printf "Select option Create(c), Delete(d): "
+    read option
+    case $option in
+        c|C)
+            echo "Create new tag"
+            echo "Latest tag: $(git describe --tags)"
+            printf "Enter new version (e.g 0.0.0): "
+            read tag
+            git tag -a $tag -m "Release $tag"
+            git push origin $tag
+            ;;
+        d|D)
+            echo "Deleting tag"
+            echo "Latest tag: $(git describe --tags)"
+            echo "Enter tag to delete: "
+            read tag
+            git tag -d $tag
+            git push origin --delete $tag
+            ;;
+        *)
+            echo "Invalid option"
+            exit 1
+            ;;
+    esac
 }
 
-clean() { rm -f quo; }
+clean() { rm -f build; }
 
 usage() {
     echo "Usage: $0 [option]"
     echo "Options:"
-    echo "  -b, --build [options...]  Build the QUO cli (default)"
+    echo "  build [options...]  Build the QUO cli (default)"
     echo "                            Options (can be combined):"
     echo "                              release   Optimized build"
     echo "                              debug     Enable debug logs"
     echo "                              sanitize  Enable address sanitizer"
-    echo "  -r, --run                 Run the QUO cli on test.quo"
-    echo "  --dist                    Create distribution archive"
-    echo "  --tag                     Create a new tag"
-    echo "  -e, --example <name>      Run example at examples/<name>"
-    echo "  -d, --debug               Debug the QUO cli on test.quo"
-    echo "  -t, --test                Run the QUO test suite"
-    echo "  -s, --stats               Print statistics of quo.h"
-    echo "  -c, --clean               Clean up build artifacts"
-    echo "  -h, --help                Show this help message"
+    echo "  run                 Run the QUO cli on test.quo"
+    echo "  dist                Create distribution archive"
+    echo "  tag                 Manage git tags"
+    echo "  debug               Debug the QUO cli on test.quo"
+    echo "  test                Run the QUO test suite"
+    echo "  stats               Print statistics of quo.h"
+    echo "  clean               Clean up build artifacts"
+    echo "  help                Show this help message"
     exit 1
 }
 
 # ---------- ARGUMENTS PARSING ---------- #
 
 case ${1-} in
-  -b|--build)   shift ; build "$@" ;;
-  -r|--run)     run   ;;
-  --tag)        tag   ;;
-  -e|--example) example "$@" ;;
-  -d|--debug)   debug ;;
-  --dist)       dist  ;;
-  -t|--test)    test  ;;
-  -s|--stats)   stats ;;
-  -c|--clean)   clean ;;
-  -h|--help|*)  usage ;;
+  build)   shift ; build "$@" ;;
+  run)     run   ;;
+  tag)     tag   ;;
+  example) example "$@" ;;
+  debug)   debug ;;
+  dist)    dist  ;;
+  test)    test  ;;
+  stats)   stats ;;
+  clean)   clean ;;
+  help)    usage ;;
+  *)       usage ;;
 esac
