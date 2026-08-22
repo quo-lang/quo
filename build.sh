@@ -33,7 +33,7 @@ run() {
 }
 
 # Run QUO in the GDB
-debug() {
+gdb() {
     build debug
     cmd gdb -ex run -ex bt -ex quit --args ./build/quo test.quo
 }
@@ -42,7 +42,7 @@ debug() {
 test() {
     build
     cd tests
-    for f in $(ls -I utils.quo | sort -n); do
+    for f in $(ls); do
         name=$(basename "$f")
         printf "Test: %-20s " $name
         ../build/quo $name
@@ -108,7 +108,7 @@ usage() {
     echo "  run                 Run the QUO cli on test.quo"
     echo "  dist                Create distribution archive"
     echo "  tag                 Manage git tags"
-    echo "  debug               Debug the QUO cli on test.quo"
+    echo "  gdb                 Debug the QUO cli on test.quo"
     echo "  test                Run the QUO test suite"
     echo "  stats               Print statistics of quo.h"
     echo "  clean               Clean up build artifacts"
