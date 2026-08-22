@@ -1469,7 +1469,7 @@ static QuoVar quo__builtin_input(QuoModule *m, int argc, QuoVar *argv) {
 static QuoVar quo__builtin_exit(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
   int code = 0;
-  if (argc > 0 && quo_var_is_num(&argv[0])) code = (int)argv[1].val_num;
+  if (argc > 0 && quo_var_is_num(&argv[0])) code = (int)argv[0].val_num;
   exit(code);
   return quo_var_new_nil();
 }

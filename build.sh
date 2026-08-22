@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Build script for QUO project.
-# Run `./build.sh -h` to see the build options.
+# Run `./build.sh help` to see the build options.
 
 # ---------- UTIL FUNCTIONS ---------- #
 
@@ -10,6 +10,11 @@ cmd() { echo "$@";"$@"; }
 # ---------- COMMANDS FUNCTIONS ---------- #
 
 # Build QUO CLI
+# Options:
+#   release
+#   debug
+#   sanitize
+#   gperf
 build() {
     mkdir -p build
     CFLAGS="-Wall -Wextra"
@@ -48,22 +53,6 @@ test() {
         else printf "\033[31mFAIL\033[0m\n"; exit 1
         fi
     done
-}
-
-# Build and run example
-example() {
-    shift
-    if [ ! $# -eq 1 ]; then
-        echo "Missing example name"
-        usage
-    fi
-    if [ ! -f examples/$1/build.quo ]; then
-        echo "Example not found: examples/$1"
-        exit 1
-    fi
-    build
-    cd examples/$1
-    ../../build/quo build.quo
 }
 
 # Print statistics of quo.h
@@ -111,7 +100,7 @@ tag() {
     esac
 }
 
-clean() { rm -f build; }
+clean() { rm -rf build; }
 
 usage() {
     echo "Usage: $0 [option]"
@@ -138,7 +127,6 @@ case ${1-} in
   build)   shift ; build "$@" ;;
   run)     run   ;;
   tag)     tag   ;;
-  example) example "$@" ;;
   debug)   debug ;;
   dist)    dist  ;;
   test)    test  ;;

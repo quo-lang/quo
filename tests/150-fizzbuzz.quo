@@ -1,6 +1,6 @@
 # Testing global and local variables, loop, if / else if / else.
 
-var utils = import("utils")
+var utils = import("utils.quo")
 var assert = utils.assert
 
 var fizz_count = 0

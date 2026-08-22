@@ -1,4 +1,4 @@
-var utils = import("utils")
+var utils = import("utils.quo")
 var assert = utils.assert
 
 assert("foo" == "foo")

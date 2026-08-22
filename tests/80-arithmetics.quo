@@ -1,4 +1,4 @@
-var utils = import("utils")
+var utils = import("utils.quo")
 var assert = utils.assert
 
 # Basic arithmetic
@@ -21,12 +21,12 @@ assert(10 - (6 / 2) == 7)
 
 # Complex expressions
 assert(1 + 2 * 3 - 4 / 2 == 5)
-assert((1 + 2) * (3 - 4) / 2 == -1)
+assert((1 + 2) * (3 - 4) / 2 == -1.5)
 assert(10 / 2 * 5 == 25)
 assert(10 * 2 / 5 == 4)
 assert(((69 - 10) + 1) / 5 * 2 == 24)
 assert((((1 + 2) * 3) - 4) / 5 == 1)
-assert(1 + (2 * (3 - (4 / 5))) == 7)
+assert(1 + (2 * (3 - (4 / 5))) == 5.4)
 assert((((10 / 2) * (3 + 1)) - 5) * 2 == 30)
 
 # Negation
