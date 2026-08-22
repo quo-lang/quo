@@ -62,11 +62,7 @@ stats() {
 dist() {
     echo "Creating distribution"
     build release
-    TAG=$(git describe --tags)
-    cp -r include build/
-    cd build
-    tar -czvf quo-$TAG-linux.tar.gz quo include/
-    rm -rf quo include
+    tar -czvf build/quo-$(git describe --tags --abbrev=0)-linux.tar.gz -C build quo -C .. include
     echo "Done"
 }
 
@@ -77,7 +73,7 @@ tag() {
     case $option in
         c|C)
             echo "Create new tag"
-            echo "Latest tag: $(git describe --tags)"
+            echo "Latest tag: $(git describe --tags --abbrev=0)"
             printf "Enter new version (e.g 0.0.0): "
             read tag
             git tag -a $tag -m "Release $tag"
