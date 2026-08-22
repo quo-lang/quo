@@ -1,6 +1,9 @@
 <div align="center">
     <img src="assets/logo.svg" alt="Quo Logo" width=200 height=200>
     <h1>Quo</h1>
+
+    ![Tests](https://github.com/quo-lang/quo/actions/workflows/tests.yml/badge.svg?branch=main)
+
 </div>
 
 **Quo** is a small, interpreted, embeddable, dynamically typed programming language with a tiny **header-only** C implementation.
