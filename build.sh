@@ -76,16 +76,20 @@ dist() {
     echo "Creating distribution"
     build release
     TAG=$(git describe --tags)
-    tar -czvf build/quo-$TAG-linux.tar.gz build/quo ./include/
+    cp -r include build/
+    cd build
+    tar -czvf quo-$TAG-linux.tar.gz quo include/
+    rm -rf quo include
+    echo "Done"
 }
 
 tag() {
     echo "Creating new tag"
     echo "Latest tag: $(git describe --tags)"
-    printf "Enter new version (e.g 0.0.1): "
+    printf "Enter new version (e.g 0.0.0): "
     read tag
-    git tag -a v$tag -m "Release $tag"
-    git push origin v$tag
+    git tag -a $tag -m "Release $tag"
+    git push origin $tag
 }
 
 clean() { rm -f quo; }
@@ -99,6 +103,8 @@ usage() {
     echo "                              debug     Enable debug logs"
     echo "                              sanitize  Enable address sanitizer"
     echo "  -r, --run                 Run the QUO cli on test.quo"
+    echo "  --dist                    Create distribution archive"
+    echo "  --tag                     Create a new tag"
     echo "  -e, --example <name>      Run example at examples/<name>"
     echo "  -d, --debug               Debug the QUO cli on test.quo"
     echo "  -t, --test                Run the QUO test suite"
@@ -113,7 +119,7 @@ usage() {
 case ${1-} in
   -b|--build)   shift ; build "$@" ;;
   -r|--run)     run   ;;
-  -t|--tag)     tag   ;;
+  --tag)        tag   ;;
   -e|--example) example "$@" ;;
   -d|--debug)   debug ;;
   --dist)       dist  ;;
