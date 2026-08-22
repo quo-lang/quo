@@ -12,5 +12,5 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Compile Quo CLI
+      - name: Run Tests
         run: ./build.sh test
