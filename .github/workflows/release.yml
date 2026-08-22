@@ -22,3 +22,4 @@ jobs:
         with:
           files: build/quo-*
           tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
