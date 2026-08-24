@@ -382,8 +382,6 @@ typedef struct QuoModule {
   QuoModule *parent; // Parent module
   QuoDict *modules;  // Imported modules
 
-  QuoHashTable string_table; // String interning
-
   QuoHashTable str_methods;
   QuoHashTable arr_methods;
   QuoHashTable dict_methods;
@@ -469,6 +467,8 @@ QuoVar quo_var_to_str(QuoVar *v);
 int quo_var_len(QuoVar *v);
 int quo_var_print(QuoVar *v);
 
+void quo_cleanup();
+
 // ------------------------------------------------------------------------------------------ //
 //                                     QUO IMPLEMENTATION                                     //
 // ------------------------------------------------------------------------------------------ //
@@ -480,6 +480,11 @@ static void quo__stmt_free(QuoStmt *stmt);
 static inline bool quo__parser_check(QuoModule *m, enum QuoTokenType type);
 static inline void quo__parser_advance(QuoModule *m);
 static QuoStmt *quo__parser_stmt(QuoModule *m);
+
+// --- GLOBALS --- //
+
+static QuoHashTable quo__interned_strings = {0};
+static QuoHashTable quo__types = {0};
 
 // Operations codes
 typedef enum {
@@ -873,6 +878,19 @@ void quo_ht_free(QuoHashTable *t) {
   da_free(t);
 }
 
+// -------------------- INIT / CLEANUP -------------------- //
+
+void quo_cleanup() {
+  // Free string table LAST - after all objects that might reference strings are gone
+  for (int i = 0; i < quo__interned_strings.capacity; i++) {
+    if (quo__interned_strings.items[i].key) {
+      quo_dealloc(quo__interned_strings.items[i].key->data);
+      quo_dealloc(quo__interned_strings.items[i].key);
+    }
+  }
+  quo_ht_free(&quo__interned_strings);
+}
+
 // -------------------- LEXER -------------------- //
 
 static enum QuoTokenType quo__keywords[] = {
@@ -1128,15 +1146,6 @@ void quo_obj_unref(QuoObj *obj) {
     quo_dealloc(m->cwd);
     quo_dealloc(m->source);
     quo_dealloc(m->file_path);
-
-    // Free string table LAST - after all objects that might reference strings are gone
-    for (int i = 0; i < m->string_table.capacity; i++) {
-      if (m->string_table.items[i].key) {
-        quo_dealloc(m->string_table.items[i].key->data);
-        quo_dealloc(m->string_table.items[i].key);
-      }
-    }
-    quo_ht_free(&m->string_table);
     break;
   }
   case QUO_OBJ_TYPE_STR: quo_dealloc(quo_obj_as_str(obj)->data); break;
@@ -1147,8 +1156,6 @@ void quo_obj_unref(QuoObj *obj) {
 }
 
 // --- STRING FUNCTIONS --- //
-
-static QuoHashTable quo__interned_strings = {0};
 
 static inline QuoStr *quo__find_string(const char *chars, int length, int hash) {
   if (quo__interned_strings.count == 0) return NULL;
@@ -1724,7 +1731,6 @@ QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_p
   m->cleanup_fn = cleanup_fn;
   m->modules = quo_dict_new();
 
-  quo_ht_init(&m->string_table);
   quo_ht_init(&m->str_methods);
   quo_ht_init(&m->arr_methods);
   quo_ht_init(&m->dict_methods);
@@ -1801,8 +1807,6 @@ void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCF
   QuoVar var = quo_var_new_obj(cfn);
   quo_module_register_var(m, cfn->name, var);
 }
-
-static QuoHashTable quo__types = {0};
 
 QuoObj *quo_type_register(const char *name, size_t size) {
   QuoObj *obj = quo_obj_new(size);

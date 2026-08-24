@@ -98,6 +98,8 @@ static int quo__run(const char *path) {
   quo_var_unref(&result);
   quo_obj_unref((QuoObj *)m);
 
+  quo_cleanup();
+
   return exit_code;
 }
 

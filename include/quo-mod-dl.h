@@ -1,7 +1,11 @@
 /*
 
 DESCRIPTION:
-    Quo module for dynamic linking with libffi support
+    Quo module for dynamic linking with libffi support.
+
+DEPENDENCIES:
+    - libffi development files
+    - Add -lffi to your linker flags to link against libffi
 
 QUO API:
     var dl = import("dl")
@@ -15,6 +19,7 @@ QUO API:
 #define QUO_MOD_DL_H
 
 #include "quo.h"
+
 #include <ffi.h>
 
 #ifdef __cplusplus
