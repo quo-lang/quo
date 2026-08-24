@@ -3,6 +3,8 @@
 # Build script for QUO project.
 # Run `./build.sh` to see the options.
 
+set -e
+
 # ---------- UTIL FUNCTIONS ---------- #
 
 cmd() { echo "$@";"$@"; }
@@ -18,13 +20,14 @@ cmd() { echo "$@";"$@"; }
 build() {
     mkdir -p build
     CFLAGS="-Wall -Wextra"
+    LDFLAGS="-lffi"
     case $1 in
         release) CFLAGS="$CFLAGS -O3 -DNDEBUG" ;;
         debug) CFLAGS="$CFLAGS -DQUO_DEBUG -g" ;;
         sanitize) CFLAGS="$CFLAGS -fsanitize=address" ;;
         gperf) CFLAGS="$CFLAGS -pg -O2" ;;
     esac
-    cmd gcc $CFLAGS -o build/quo cli/*.c
+    cmd gcc $CFLAGS -o build/quo cli/*.c $LDFLAGS
 }
 
 run() {

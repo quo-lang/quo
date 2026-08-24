@@ -315,9 +315,10 @@ static inline QuoVar quo__mod_fs_get_tmp_dir(QuoModule *m, int argc, QuoVar *arg
 // --- QuoFSFile --- //
 
 static inline QuoVar quo__mod_fs_open(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
   if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
     return quo_var_new_err("fs.open() requires a path string and mode string");
-  QuoFSFile *file = (QuoFSFile *)quo_module_get_type_instance(m, "QuoFSFile", -1);
+  QuoFSFile *file = (QuoFSFile *)quo_type_get_instance("QuoFSFile");
   file->path = quo_var_as_str(&argv[0]);
   file->file = fopen(file->path->data, quo_var_as_str(&argv[1])->data);
   if (!file->file) {
@@ -387,11 +388,11 @@ static inline void quo_mod_fs_init(QuoModule *parent) {
   quo_module_register_cfn(m, "cd", -1, quo__mod_fs_cd);
   quo_module_register_cfn(m, "get_tmp_dir", -1, quo__mod_fs_get_tmp_dir);
 
-  QuoObj *fs_file_type = quo_module_register_type(m, "QuoFSFile", -1, sizeof(QuoFSFile));
-  quo_module_type_add_cfn(m, fs_file_type, "get_path", -1, quo__mod_fs_get_path);
-  quo_module_type_add_cfn(m, fs_file_type, "read", -1, quo__mod_fs_read);
-  quo_module_type_add_cfn(m, fs_file_type, "write", -1, quo__mod_fs_write);
-  quo_module_type_add_cfn(m, fs_file_type, "read_lines", -1, quo__mod_fs_read_lines);
+  QuoObj *fs_file_type = quo_type_register("QuoFSFile", sizeof(QuoFSFile));
+  quo_type_add_cfn(fs_file_type, "get_path", -1, quo__mod_fs_get_path);
+  quo_type_add_cfn(fs_file_type, "read", -1, quo__mod_fs_read);
+  quo_type_add_cfn(fs_file_type, "write", -1, quo__mod_fs_write);
+  quo_type_add_cfn(fs_file_type, "read_lines", -1, quo__mod_fs_read_lines);
 }
 
 #ifdef __cplusplus
