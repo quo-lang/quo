@@ -7,7 +7,7 @@ QUO API:
     var dl = import("dl")
     var libm = dl.open("libm.so.6") # Loads the libm.so.6 library
     var sqrt_func = libm.sym("sqrt") # Gets the sqrt symbol
-    var result = sqrt_func(16.0) # Calls sqrt(16.0) -> 4.0
+    var result = sqrt_func.call(16.0) # Calls sqrt(16.0) -> 4.0
     libm.close() # Close loaded library
 */
 
