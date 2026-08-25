@@ -434,13 +434,9 @@ typedef struct QuoModule {
   QuoObj obj;   // Base class
   QuoStr *name; // Module name
 
-  QuoHashTable str_methods;
-  QuoHashTable arr_methods;
-  QuoHashTable dict_methods;
   QuoHashTable globals;
 
   // --- PARSER --- //
-
   int pos, line, column;      // Lexer position
   char *cwd;                  // Working directory
   char *file_path;            // File path
@@ -448,11 +444,9 @@ typedef struct QuoModule {
   QuoToken current, previous; // Parser tokens
   da(QuoTokenList) scopes;    // Scope tracking
   int loop_count;             // Loop tracking
-  QuoStmtList ast;            // Abstract syntax tree
-
   bool had_compile_error;
-
-  QuoFn *fn; // Compiled main function
+  QuoStmtList ast; // Abstract syntax tree
+  QuoFn *fn;       // Compiled main function
 
   QuoModuleCleanupFn cleanup_fn;
 } QuoModule;
@@ -537,6 +531,10 @@ static QuoStmt *quo__parser_stmt(QuoModule *m);
 static QuoHashTable quo__types = {0};
 static QuoHashTable quo__interned_strings = {0};
 static QuoHashTable quo__imported_modules = {0};
+
+static QuoHashTable quo__str_methods = {0};
+static QuoHashTable quo__arr_methods = {0};
+static QuoHashTable quo__dict_methods = {0};
 
 // Operations codes
 typedef enum {
@@ -906,28 +904,6 @@ void quo_ht_free(QuoHashTable *t) {
   da_free(t);
 }
 
-// -------------------- INIT / CLEANUP -------------------- //
-
-void quo_init() {}
-
-void quo_cleanup() {
-  // Free imported modules first - this will cascade and free most objects
-  quo_ht_free(&quo__imported_modules);
-
-  // Free registered types
-  quo_ht_free(&quo__types);
-
-  // Finally, free all interned strings
-  for (int i = 0; i < quo__interned_strings.capacity; i++) {
-    if (quo__interned_strings.items[i].key) {
-      QuoStr *str = quo__interned_strings.items[i].key;
-      quo_dealloc(str->data);
-      quo_dealloc(str);
-    }
-  }
-  da_free(&quo__interned_strings);
-}
-
 // -------------------- LEXER -------------------- //
 
 static enum QuoTokenType quo__keywords[] = {
@@ -1165,9 +1141,6 @@ void quo_obj_unref(QuoObj *obj) {
 
     // Free globals and method tables
     quo_ht_free(&m->globals);
-    quo_ht_free(&m->str_methods);
-    quo_ht_free(&m->arr_methods);
-    quo_ht_free(&m->dict_methods);
 
     // Free parser structures
     for (int i = 0; i < da_count(&m->ast); i++) quo__stmt_free(da_at(&m->ast, i));
@@ -1721,14 +1694,7 @@ static QuoVar quo__dict_method_values(QuoModule *m, int argc, QuoVar *argv) {
   return quo_var_new_obj(values);
 }
 
-// - REGISTER AND DISPATCH METHODS - //
-
-static inline void quo__register_builtin_method(QuoHashTable *methods, const char *name, QuoCFunctionPtr fn) {
-  QuoCFn *cfn = quo_cfunction_new(name, -1, fn);
-  quo_ht_set(methods, cfn->name, quo_var_new_obj(cfn));
-}
-
-static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
+static QuoObj *quo__method_lookup(QuoVar *val, QuoStr *name) {
   QuoHashTable *methods = NULL;
   switch (val->type) {
   case QUO_VAR_TYPE_NIL:
@@ -1737,9 +1703,9 @@ static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
   case QUO_VAR_TYPE_ERROR: break;
   case QUO_VAR_TYPE_OBJ: {
     switch (val->val_obj->type) {
-    case QUO_OBJ_TYPE_STR: methods = &m->str_methods; break;
-    case QUO_OBJ_TYPE_ARR: methods = &m->arr_methods; break;
-    case QUO_OBJ_TYPE_DICT: methods = &m->dict_methods; break;
+    case QUO_OBJ_TYPE_STR: methods = &quo__str_methods; break;
+    case QUO_OBJ_TYPE_ARR: methods = &quo__arr_methods; break;
+    case QUO_OBJ_TYPE_DICT: methods = &quo__dict_methods; break;
     case QUO_OBJ_TYPE_USER: methods = &val->val_obj->dict->dict; break;
     case QUO_OBJ_TYPE_MODULE:
     case QUO_OBJ_TYPE_FN:
@@ -1762,9 +1728,6 @@ QuoModule *quo_module_new(const char *cwd, const char *file_path, const char *so
   m->obj.type = QUO_OBJ_TYPE_MODULE;
   m->cleanup_fn = cleanup_fn;
 
-  quo_ht_init(&m->str_methods);
-  quo_ht_init(&m->arr_methods);
-  quo_ht_init(&m->dict_methods);
   quo_ht_init(&m->globals);
 
   // Register stdlib
@@ -1779,28 +1742,6 @@ QuoModule *quo_module_new(const char *cwd, const char *file_path, const char *so
   quo_module_register_cfn(m, "num", -1, quo__builtin_num);
   quo_module_register_cfn(m, "str", -1, quo__builtin_str);
   quo_module_register_cfn(m, "len", -1, quo__builtin_len);
-
-  // Register built-in methods functions
-  // String
-  quo__register_builtin_method(&m->str_methods, "get", quo__str_method_get);
-  quo__register_builtin_method(&m->str_methods, "strip", quo__str_method_strip);
-  quo__register_builtin_method(&m->str_methods, "startswith", quo__str_method_startswith);
-  quo__register_builtin_method(&m->str_methods, "endswith", quo__str_method_endswith);
-  quo__register_builtin_method(&m->str_methods, "contains", quo__str_method_contains);
-  quo__register_builtin_method(&m->str_methods, "split", quo__str_method_split);
-  quo__register_builtin_method(&m->str_methods, "replace", quo__str_method_replace);
-  // Array
-  quo__register_builtin_method(&m->arr_methods, "get", quo__arr_method_get);
-  quo__register_builtin_method(&m->arr_methods, "set", quo__arr_method_set);
-  quo__register_builtin_method(&m->arr_methods, "push", quo__arr_method_push);
-  quo__register_builtin_method(&m->arr_methods, "pop", quo__arr_method_pop);
-  // Dictionary
-  quo__register_builtin_method(&m->dict_methods, "get", quo__dict_method_get);
-  quo__register_builtin_method(&m->dict_methods, "set", quo__dict_method_set);
-  quo__register_builtin_method(&m->dict_methods, "has", quo__dict_method_has);
-  quo__register_builtin_method(&m->dict_methods, "del", quo__dict_method_del);
-  quo__register_builtin_method(&m->dict_methods, "keys", quo__dict_method_keys);
-  quo__register_builtin_method(&m->dict_methods, "values", quo__dict_method_values);
 
   m->name = quo_str_new_interned(file_path, -1);
   quo_ht_set(&quo__imported_modules, m->name, quo_var_new_obj(m));
@@ -3348,7 +3289,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       // Stack: [object]
       QuoVar object = *quo__vm_peek(vm, 0);
       // Look up method in array method table
-      QuoObj *method = quo__method_lookup(vm->m, &object, quo_var_as_str(&field_name));
+      QuoObj *method = quo__method_lookup(&object, quo_var_as_str(&field_name));
       if (method) {
         // Return the method (as a function value)
         quo_var_unref(quo__vm_peek(vm, 0));
@@ -3432,7 +3373,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       bool is_method = false; // Whether method takes 'self' as first arg
 
       // First lookup for type methods
-      method = quo__method_lookup(vm->m, object, quo_var_as_str(&method_name));
+      method = quo__method_lookup(object, quo_var_as_str(&method_name));
       if (method) {
         is_method = true; // Type methods take 'self'
       }
@@ -3515,6 +3456,55 @@ void quo_vm_free(QuoVM *vm) {
   da_free(&vm->stack);
   da_free(&vm->frames);
   quo_dealloc(vm);
+}
+
+// -------------------- INIT / CLEANUP -------------------- //
+
+static inline void quo__register_builtin_method(QuoHashTable *methods, const char *name, QuoCFunctionPtr fn) {
+  QuoCFn *cfn = quo_cfunction_new(name, -1, fn);
+  quo_ht_set(methods, cfn->name, quo_var_new_obj(cfn));
+}
+
+void quo_init() {
+  // Register built-in methods functions
+  // String
+  quo__register_builtin_method(&quo__str_methods, "get", quo__str_method_get);
+  quo__register_builtin_method(&quo__str_methods, "strip", quo__str_method_strip);
+  quo__register_builtin_method(&quo__str_methods, "startswith", quo__str_method_startswith);
+  quo__register_builtin_method(&quo__str_methods, "endswith", quo__str_method_endswith);
+  quo__register_builtin_method(&quo__str_methods, "contains", quo__str_method_contains);
+  quo__register_builtin_method(&quo__str_methods, "split", quo__str_method_split);
+  quo__register_builtin_method(&quo__str_methods, "replace", quo__str_method_replace);
+  // Array
+  quo__register_builtin_method(&quo__arr_methods, "get", quo__arr_method_get);
+  quo__register_builtin_method(&quo__arr_methods, "set", quo__arr_method_set);
+  quo__register_builtin_method(&quo__arr_methods, "push", quo__arr_method_push);
+  quo__register_builtin_method(&quo__arr_methods, "pop", quo__arr_method_pop);
+  // Dictionary
+  quo__register_builtin_method(&quo__dict_methods, "get", quo__dict_method_get);
+  quo__register_builtin_method(&quo__dict_methods, "set", quo__dict_method_set);
+  quo__register_builtin_method(&quo__dict_methods, "has", quo__dict_method_has);
+  quo__register_builtin_method(&quo__dict_methods, "del", quo__dict_method_del);
+  quo__register_builtin_method(&quo__dict_methods, "keys", quo__dict_method_keys);
+  quo__register_builtin_method(&quo__dict_methods, "values", quo__dict_method_values);
+}
+
+void quo_cleanup() {
+  quo_ht_free(&quo__str_methods);
+  quo_ht_free(&quo__arr_methods);
+  quo_ht_free(&quo__dict_methods);
+  quo_ht_free(&quo__imported_modules);
+  quo_ht_free(&quo__types);
+
+  // Free all interned strings
+  for (int i = 0; i < quo__interned_strings.capacity; i++) {
+    if (quo__interned_strings.items[i].key) {
+      QuoStr *str = quo__interned_strings.items[i].key;
+      quo_dealloc(str->data);
+      quo_dealloc(str);
+    }
+  }
+  da_free(&quo__interned_strings);
 }
 
 // -------------------- DEBUG -------------------- //
