@@ -39,6 +39,54 @@
 void *quo_alloc(void *ptr, size_t size);
 void quo_dealloc(void *ptr);
 
+// Memory arena
+typedef struct {
+  size_t size;     // Bytes currently allocated
+  size_t capacity; // Total bytes available
+  size_t offset;   // Current allocation pointer
+  char *data;
+} QuoArena;
+
+static inline QuoArena quo_arena_create(size_t capacity) {
+  QuoArena arena = {0};
+  arena.capacity = capacity;
+  arena.data = calloc(1, capacity);
+  assert(arena.data != NULL);
+  return arena;
+}
+
+static inline void *quo_arena_alloc(QuoArena *arena, size_t size) {
+  assert(arena != NULL && size > 0);
+  if (arena->offset > SIZE_MAX - size) return NULL; // Check for overflow in offset + size
+  // Check if we need more space
+  if (arena->offset + size > arena->capacity) {
+    size_t new_capacity = arena->capacity * 2;
+    // Handle overflow and minimum size
+    if (new_capacity < arena->capacity) new_capacity = arena->capacity + size;
+    if (new_capacity < arena->offset + size) new_capacity = arena->offset + size;
+    // Ensure we grow by at least 1
+    if (new_capacity <= arena->capacity) new_capacity = arena->capacity + 1;
+    void *new_data = realloc(arena->data, new_capacity);
+    if (!new_data) return NULL;
+    arena->data = new_data;
+    arena->capacity = new_capacity;
+  }
+  void *ptr = arena->data + arena->offset;
+  arena->offset += size;
+  arena->size += size;
+  return ptr;
+}
+
+static inline void quo_arena_destroy(QuoArena *arena) {
+  assert(arena != NULL);
+  if (arena->data) {
+    memset(arena->data, 0, arena->capacity);
+    free(arena->data);
+    arena->size = arena->capacity = arena->offset = 0;
+    arena->data = NULL;
+  }
+}
+
 // --- DYNAMIC ARRAY TYPES --- //
 
 // Dynamic array
@@ -317,7 +365,13 @@ QuoStr *quo_str_new_interned(const char *str, int len);
 QuoStr *quo_str_new(const char *str, int len);
 // Creates a new QuoStr from raw data (no escape processing).
 QuoStr *quo_str_new_raw(const char *str, int len);
-static inline bool quo_str_eq(QuoStr *a, QuoStr *b) { return a == b || a->hash == b->hash || memcmp(a->data, b->data, a->len) == 0; }
+
+static inline bool quo_str_eq(QuoStr *a, QuoStr *b) {
+  if (a == b) return true;
+  if (a->hash != b->hash) return false;
+  if (a->len != b->len) return false;
+  return memcmp(a->data, b->data, a->len) == 0;
+}
 
 static inline QuoStr *quo_obj_as_str(const QuoObj *o) { return (QuoStr *)o; }
 
@@ -377,10 +431,8 @@ typedef void (*QuoModuleCleanupFn)(QuoModule *);
 typedef bool (*QuoModuleInitFn)(QuoModule *);
 
 typedef struct QuoModule {
-  QuoObj obj;        // Base class
-  QuoStr *name;      // Module name
-  QuoModule *parent; // Parent module
-  QuoDict *modules;  // Imported modules
+  QuoObj obj;   // Base class
+  QuoStr *name; // Module name
 
   QuoHashTable str_methods;
   QuoHashTable arr_methods;
@@ -407,13 +459,11 @@ typedef struct QuoModule {
 
 // Create new QuoModule.
 // Arguments:
-//  - `parent`: Parent module. NULL for top-level modules.
-//     If `parent` is not NULL, the module will be added to the parent's modules registry.
 //  - `cwd`: Current working directory.
 //  - `file_path`: Path of the file relative to the `cwd`.
 //  - `source`: Source code of the module.
 //  - `cleanup_fn`: Function to call when the module is freed.
-QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn);
+QuoModule *quo_module_new(const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn);
 void quo_module_register_var(QuoModule *m, QuoStr *name, QuoVar value);
 // Register a global C function for accessing in quo.
 // `name_len` is the length of `name`. Pass `-1` for NULL-terminated strings.
@@ -467,6 +517,7 @@ QuoVar quo_var_to_str(QuoVar *v);
 int quo_var_len(QuoVar *v);
 int quo_var_print(QuoVar *v);
 
+void quo_init();
 void quo_cleanup();
 
 // ------------------------------------------------------------------------------------------ //
@@ -483,8 +534,9 @@ static QuoStmt *quo__parser_stmt(QuoModule *m);
 
 // --- GLOBALS --- //
 
-static QuoHashTable quo__interned_strings = {0};
 static QuoHashTable quo__types = {0};
+static QuoHashTable quo__interned_strings = {0};
+static QuoHashTable quo__imported_modules = {0};
 
 // Operations codes
 typedef enum {
@@ -562,30 +614,6 @@ void quo_vm_free(QuoVM *vm);
 
 #define quo__static_array_size(arr) ((int)(sizeof(arr) / sizeof(arr[0])))
 
-int quo_hash(const char *str, int len);
-// Returns true if the string ends with the given suffix.
-bool quo_strsuffix(const char *str, const char *suffix);
-char *quo_strdup(const char *str);
-char *quo_strdupf(const char *fmt, ...);
-char *quo_strndup(const char *str, int len);
-// Converts a string to a double.
-// Examples:
-//    quo_strtod("123.45", 6) -> 123.45
-//    quo_strtod("123_456.45", 9) -> 123456.45
-double quo_strtod(const char *s, int len);
-// Reads the contents of a file into a string.
-char *quo_read_file(const char *path);
-// Writes the contents of a string to a file.
-bool quo_write_file(const char *path, const char *content);
-
-// --- HASH TABLE --- //
-
-void quo_ht_init(QuoHashTable *t);
-bool quo_ht_set(QuoHashTable *t, QuoStr *key, QuoVar *value);
-bool quo_ht_get(QuoHashTable *t, QuoStr *key, QuoVar *value);
-bool quo_ht_del(QuoHashTable *t, QuoStr *key);
-void quo_ht_free(QuoHashTable *t);
-
 // --- LEXER --- //
 
 // Format string for QuoToken, used with QUO_TOKEN_ARG macro:
@@ -634,14 +662,14 @@ bool quo_strsuffix(const char *str, const char *suffix) {
   return strcmp(str + str_len - suffix_len, suffix) == 0;
 }
 
-char *quo_strdup(const char *str) { return quo_strndup(str, strlen(str)); }
-
 char *quo_strndup(const char *str, int len) {
   char *ptr = quo_alloc(NULL, len + 1);
   memcpy(ptr, str, len);
   ptr[len] = '\0';
   return ptr;
 }
+
+char *quo_strdup(const char *str) { return quo_strndup(str, strlen(str)); }
 
 char *quo_strdupf(const char *fmt, ...) {
   if (fmt == NULL) return NULL;
@@ -844,13 +872,13 @@ void quo_ht_init(QuoHashTable *t) {
   t->items = NULL;
 }
 
-bool quo_ht_set(QuoHashTable *t, QuoStr *key, QuoVar *value) {
+bool quo_ht_set(QuoHashTable *t, QuoStr *key, QuoVar value) {
   if (t->count + 1 > t->capacity * 0.75) quo__ht_adjust_capacity(t, t->capacity * 2);
   QuoHashTableEntry *entry = quo__ht_find_entry(t->items, t->capacity, key);
   bool new = entry->key == NULL;
   if (new && quo_var_is_nil(&entry->value)) t->count++;
   entry->key = key;
-  entry->value = *value;
+  entry->value = value;
   return new;
 }
 
@@ -880,15 +908,24 @@ void quo_ht_free(QuoHashTable *t) {
 
 // -------------------- INIT / CLEANUP -------------------- //
 
+void quo_init() {}
+
 void quo_cleanup() {
-  // Free string table LAST - after all objects that might reference strings are gone
+  // Free imported modules first - this will cascade and free most objects
+  quo_ht_free(&quo__imported_modules);
+
+  // Free registered types
+  quo_ht_free(&quo__types);
+
+  // Finally, free all interned strings
   for (int i = 0; i < quo__interned_strings.capacity; i++) {
     if (quo__interned_strings.items[i].key) {
-      quo_dealloc(quo__interned_strings.items[i].key->data);
-      quo_dealloc(quo__interned_strings.items[i].key);
+      QuoStr *str = quo__interned_strings.items[i].key;
+      quo_dealloc(str->data);
+      quo_dealloc(str);
     }
   }
-  quo_ht_free(&quo__interned_strings);
+  da_free(&quo__interned_strings);
 }
 
 // -------------------- LEXER -------------------- //
@@ -1125,7 +1162,6 @@ void quo_obj_unref(QuoObj *obj) {
 
     // Free main function first
     if (m->fn) quo_obj_unref((QuoObj *)m->fn);
-    quo_obj_unref((QuoObj *)m->modules);
 
     // Free globals and method tables
     quo_ht_free(&m->globals);
@@ -1208,7 +1244,7 @@ QuoStr *quo_str_new_interned(const char *str, int len) {
   string->char_len = quo__utf8_strlen(processed, out_len);
   string->hash = hash;
   string->interned = true;
-  quo_ht_set(&quo__interned_strings, string, &quo_var_new_nil());
+  quo_ht_set(&quo__interned_strings, string, quo_var_new_nil());
   return string;
 }
 
@@ -1277,7 +1313,7 @@ QuoVar quo_dict_get(QuoDict *dict, QuoStr *key) {
 }
 bool quo_dict_set(QuoDict *dict, QuoStr *key, QuoVar *value) {
   quo_var_ref(value);
-  return quo_ht_set(&dict->dict, key, value);
+  return quo_ht_set(&dict->dict, key, *value);
 }
 bool quo_dict_del(QuoDict *dict, QuoStr *key) {
   QuoVar value;
@@ -1382,15 +1418,11 @@ QuoCFn *quo_cfunction_new(const char *name, int name_len, QuoCFunctionPtr ptr) {
 // - BUILT-IN FUNCTIONS - //
 
 // Find existing module
-static QuoModule *quo__mod_exists(QuoModule *m, const char *path) {
-  QuoModule *curr = m;
+static QuoModule *quo__mod_exists(const char *path) {
   QuoStr *mod_name = quo_str_new_interned(path, -1);
-  while (curr) {
-    QuoVar value = quo_dict_get(curr->modules, mod_name);
-    if (quo_var_is_module(&value)) return quo_var_as_module(&value);
-    curr = curr->parent;
-  }
-  return NULL;
+  QuoVar value;
+  if (!quo_ht_get(&quo__imported_modules, mod_name, &value)) return NULL;
+  return quo_var_as_module(&value);
 }
 
 static QuoVar quo__builtin_import(QuoModule *m, int argc, QuoVar *argv) {
@@ -1398,7 +1430,7 @@ static QuoVar quo__builtin_import(QuoModule *m, int argc, QuoVar *argv) {
   QuoStr *path = quo_var_as_str(&argv[0]);
 
   if (!quo_strsuffix(path->data, ".quo")) {
-    QuoModule *exists = quo__mod_exists(m, path->data);
+    QuoModule *exists = quo__mod_exists(path->data);
     if (exists) return quo_var_new_obj(exists);
   }
 
@@ -1409,7 +1441,8 @@ static QuoVar quo__builtin_import(QuoModule *m, int argc, QuoVar *argv) {
     return quo_var_new_err("Module not found");
   }
   char *mod_cwd = quo_dirname(mod_path);
-  QuoModule *mod = quo_module_new(m, mod_cwd, mod_path, mod_source, NULL);
+  QuoModule *mod = quo_module_new(mod_cwd, mod_path, mod_source, NULL);
+
   quo_dealloc(mod_source);
   quo_dealloc(mod_cwd);
   quo_dealloc(mod_path);
@@ -1692,8 +1725,7 @@ static QuoVar quo__dict_method_values(QuoModule *m, int argc, QuoVar *argv) {
 
 static inline void quo__register_builtin_method(QuoHashTable *methods, const char *name, QuoCFunctionPtr fn) {
   QuoCFn *cfn = quo_cfunction_new(name, -1, fn);
-  QuoVar var = quo_var_new_obj(cfn);
-  quo_ht_set(methods, cfn->name, &var);
+  quo_ht_set(methods, cfn->name, quo_var_new_obj(cfn));
 }
 
 static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
@@ -1723,13 +1755,12 @@ static QuoObj *quo__method_lookup(QuoModule *m, QuoVar *val, QuoStr *name) {
 
 // --- MODULE --- //
 
-QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn) {
+QuoModule *quo_module_new(const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn) {
   assert(cwd != NULL && file_path != NULL);
 
   QuoModule *m = (QuoModule *)quo_obj_new(sizeof(QuoModule));
   m->obj.type = QUO_OBJ_TYPE_MODULE;
   m->cleanup_fn = cleanup_fn;
-  m->modules = quo_dict_new();
 
   quo_ht_init(&m->str_methods);
   quo_ht_init(&m->arr_methods);
@@ -1772,11 +1803,7 @@ QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_p
   quo__register_builtin_method(&m->dict_methods, "values", quo__dict_method_values);
 
   m->name = quo_str_new_interned(file_path, -1);
-  if (parent) {
-    m->parent = parent;
-    QuoVar var = quo_var_new_obj(m);
-    quo_dict_set(parent->modules, m->name, &var);
-  }
+  quo_ht_set(&quo__imported_modules, m->name, quo_var_new_obj(m));
   m->cwd = quo_strdup(cwd);
   m->file_path = quo_strdup(file_path);
   if (source) {
@@ -1800,7 +1827,7 @@ QuoModule *quo_module_new(QuoModule *parent, const char *cwd, const char *file_p
   return m;
 }
 
-void quo_module_register_var(QuoModule *m, QuoStr *name, QuoVar value) { quo_ht_set(&m->globals, name, &value); }
+void quo_module_register_var(QuoModule *m, QuoStr *name, QuoVar value) { quo_ht_set(&m->globals, name, value); }
 
 void quo_module_register_cfn(QuoModule *m, const char *name, int name_len, QuoCFunctionPtr fn) {
   QuoCFn *cfn = quo_cfunction_new(name, name_len, fn);
@@ -1813,8 +1840,7 @@ QuoObj *quo_type_register(const char *name, size_t size) {
   obj->type = QUO_OBJ_TYPE_USER;
   obj->name = quo_str_new_interned(name, -1);
   obj->dict = quo_dict_new();
-  QuoVar obj_var = quo_var_new_obj(obj);
-  quo_ht_set(&quo__types, obj->name, &obj_var);
+  quo_ht_set(&quo__types, obj->name, quo_var_new_obj(obj));
   return obj;
 }
 
@@ -3312,7 +3338,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       if (quo_ht_get(&frame->function->m->globals, quo_var_as_str(&name_var), &old_value)) quo_var_unref(&old_value);
       QuoVar *value = quo__vm_peek(vm, 0);
       quo_var_ref(value);
-      quo_ht_set(&frame->function->m->globals, quo_var_as_str(&name_var), value);
+      quo_ht_set(&frame->function->m->globals, quo_var_as_str(&name_var), *value);
       vm->stack.count--;
       break;
     }

@@ -125,7 +125,7 @@ static inline QuoVar quo__mod_base64_decode_url(QuoModule *m, int argc, QuoVar *
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_base64_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "base64", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "base64", NULL, NULL);
   quo_module_register_cfn(m, "encode", -1, quo__mod_base64_encode);
   quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
   quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);

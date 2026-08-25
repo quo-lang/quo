@@ -374,7 +374,7 @@ static inline QuoVar quo__mod_fs_read_lines(QuoModule *m, int argc, QuoVar *argv
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_fs_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "fs", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "fs", NULL, NULL);
   quo_module_register_cfn(m, "open", -1, quo__mod_fs_open);
   quo_module_register_cfn(m, "exists", -1, quo__mod_fs_exists);
   quo_module_register_cfn(m, "stat", -1, quo__mod_fs_stat);

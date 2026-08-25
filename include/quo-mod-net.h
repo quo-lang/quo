@@ -287,7 +287,7 @@ static inline void quo_mod_net_init(QuoModule *parent) {
     fprintf(stderr, "Error: quo-mod-net: libcurl not found, 'net' module not available\n");
     return;
   }
-  QuoModule *m = quo_module_new(parent, parent->cwd, "net", NULL, quo__mod_net_cleanup);
+  QuoModule *m = quo_module_new(parent->cwd, "net", NULL, quo__mod_net_cleanup);
   quo_module_register_cfn(m, "get", -1, quo__mod_net_get);
   quo_module_register_cfn(m, "post", -1, quo__mod_net_post);
   quo_module_register_cfn(m, "put", -1, quo__mod_net_put);

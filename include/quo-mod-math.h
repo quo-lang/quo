@@ -59,8 +59,6 @@ QUO API:
 #pragma once
 
 #include "quo.h"
-#include <math.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -370,7 +368,7 @@ static inline bool quo_mod_math_init(QuoModule *parent) {
     fprintf(stderr, "Error: quo-mod-math: libm not found, 'math' namespace not available\n");
     return false;
   }
-  QuoModule *m = quo_module_new(parent, parent->cwd, "net", NULL, quo__mod_math_cleanup);
+  QuoModule *m = quo_module_new(parent->cwd, "net", NULL, quo__mod_math_cleanup);
   quo_module_register_cfn(m, "floor", -1, quo__mod_math_floor);
   quo_module_register_cfn(m, "ceil", -1, quo__mod_math_ceil);
   quo_module_register_cfn(m, "round", -1, quo__mod_math_round);

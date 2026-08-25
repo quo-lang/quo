@@ -51,7 +51,7 @@ static QuoVar quo__mod_os_name(QuoModule *m, int argc, QuoVar *argv) {
 // ---------- PUBLIC API ---------- //
 
 static inline bool quo_mod_os_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "os", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "os", NULL, NULL);
   quo_module_register_cfn(m, "system", -1, quo__mod_os_system);
   quo_module_register_cfn(m, "name", -1, quo__mod_os_name);
   return true;

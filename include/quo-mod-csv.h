@@ -283,7 +283,7 @@ static inline QuoVar quo__mod_csv_stringify_dict(QuoModule *m, int argc, QuoVar 
 // ---------- PUBLIC API ---------- //
 
 static inline bool quo_mod_csv_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "csv", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "csv", NULL, NULL);
   quo_module_register_cfn(m, "parse", -1, quo__mod_csv_parse);
   quo_module_register_cfn(m, "parse_dict", -1, quo__mod_csv_parse_dict);
   quo_module_register_cfn(m, "stringify", -1, quo__mod_csv_stringify);

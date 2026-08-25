@@ -172,7 +172,7 @@ static inline QuoVar quo__mod_uuid_is_valid(QuoModule *m, int argc, QuoVar *argv
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_uuid_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "uuid", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "uuid", NULL, NULL);
   quo_module_register_cfn(m, "v4", -1, quo__mod_uuid_v4);
   quo_module_register_cfn(m, "v7", -1, quo__mod_uuid_v7);
   quo_module_register_cfn(m, "parse", -1, quo__mod_uuid_parse);

@@ -60,7 +60,7 @@ static QuoVar quo__mod_time_clock(QuoModule *m, int argc, QuoVar *argv) {
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_time_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "time", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "time", NULL, NULL);
   quo_module_register_cfn(m, "sleep", -1, quo__mod_time_sleep);
   quo_module_register_cfn(m, "now", -1, quo__mod_time_now);
   quo_module_register_cfn(m, "clock", -1, quo__mod_time_clock);

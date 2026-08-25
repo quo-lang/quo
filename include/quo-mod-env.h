@@ -119,7 +119,7 @@ static inline QuoVar quo__mod_env_all(QuoModule *m, int argc, QuoVar *argv) {
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_env_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "env", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "env", NULL, NULL);
   quo_module_register_cfn(m, "get", -1, quo__mod_env_get);
   quo_module_register_cfn(m, "set", -1, quo__mod_env_set);
   quo_module_register_cfn(m, "unset", -1, quo__mod_env_unset);

@@ -149,7 +149,7 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_dl_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "dl", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "dl", NULL, NULL);
   quo_module_register_cfn(m, "open", -1, quo__mod_dl_open);
 
   QuoObj *dl_handle_type = quo_type_register("QuoDLHandle", sizeof(QuoDLHandle));

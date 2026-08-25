@@ -44,6 +44,8 @@
 // }
 
 static int quo__run(const char *path) {
+  quo_init();
+
   char *source = NULL;
   char *cwd = NULL;
   char *display_path = NULL;
@@ -68,7 +70,7 @@ static int quo__run(const char *path) {
     cwd = quo_dirname(path);
   }
 
-  QuoModule *m = quo_module_new(NULL, cwd, display_path, source, NULL);
+  QuoModule *m = quo_module_new(cwd, display_path, source, NULL);
   quo_dealloc(source);
   quo_dealloc(cwd);
   quo_dealloc(display_path);
@@ -96,7 +98,6 @@ static int quo__run(const char *path) {
     exit_code = 1;
   } else if (quo_var_is_num(&result)) exit_code = (int)result.val_num;
   quo_var_unref(&result);
-  quo_obj_unref((QuoObj *)m);
 
   quo_cleanup();
 

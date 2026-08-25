@@ -322,7 +322,7 @@ static inline QuoVar quo__mod_json_encode(QuoModule *m, int argc, QuoVar *argv) 
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_json_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent, parent->cwd, "json", NULL, NULL);
+  QuoModule *m = quo_module_new(parent->cwd, "json", NULL, NULL);
   quo_module_register_cfn(m, "encode", -1, quo__mod_json_encode);
   quo_module_register_cfn(m, "decode", -1, quo__mod_json_decode);
 }
