@@ -44,13 +44,18 @@ QUO_DEFINE_USER_TYPE(QuoDLSym, sym)
 
 static inline QuoVar quo__mod_dl_open(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
-  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("dl.open() takes library path string");
+  if (argc == 0) return quo_var_new_err("dl.open() takes at least one library path string");
   QuoDLHandle *dl = (QuoDLHandle *)quo_type_get_instance("QuoDLHandle");
   if (!dl) return quo_var_new_err("Failed to get QuoDLHandle instance");
-  QuoStr *name = quo_var_as_str(&argv[0]);
-  void *handle = dlopen(name->data, RTLD_LAZY);
-  if (!handle) return quo_var_new_err(dlerror());
-  dl->handle = handle;
+  for (int i = 0; i < argc; i++) {
+    if (!quo_var_is_str(&argv[i])) continue;
+    QuoStr *name = quo_var_as_str(&argv[i]);
+    void *handle = dlopen(name->data, RTLD_LAZY);
+    if (!handle) continue;
+    dl->handle = handle;
+    break;
+  }
+  if (!dl->handle) return quo_var_new_err("Failed to find library");
   return quo_var_new_obj(dl);
 }
 

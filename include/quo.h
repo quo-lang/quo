@@ -532,6 +532,7 @@ static QuoHashTable quo__types = {0};
 static QuoHashTable quo__interned_strings = {0};
 static QuoHashTable quo__imported_modules = {0};
 
+static QuoHashTable quo__builtin_methods = {0};
 static QuoHashTable quo__str_methods = {0};
 static QuoHashTable quo__arr_methods = {0};
 static QuoHashTable quo__dict_methods = {0};
@@ -1730,19 +1731,6 @@ QuoModule *quo_module_new(const char *cwd, const char *file_path, const char *so
 
   quo_ht_init(&m->globals);
 
-  // Register stdlib
-
-  // Register global built-in functions
-  quo_module_register_cfn(m, "import", -1, quo__builtin_import);
-  quo_module_register_cfn(m, "type", -1, quo__builtin_type);
-  quo_module_register_cfn(m, "print", -1, quo__builtin_print);
-  quo_module_register_cfn(m, "input", -1, quo__builtin_input);
-  quo_module_register_cfn(m, "exit", -1, quo__builtin_exit);
-  quo_module_register_cfn(m, "bool", -1, quo__builtin_bool);
-  quo_module_register_cfn(m, "num", -1, quo__builtin_num);
-  quo_module_register_cfn(m, "str", -1, quo__builtin_str);
-  quo_module_register_cfn(m, "len", -1, quo__builtin_len);
-
   m->name = quo_str_new_interned(file_path, -1);
   quo_ht_set(&quo__imported_modules, m->name, quo_var_new_obj(m));
   m->cwd = quo_strdup(cwd);
@@ -2332,10 +2320,8 @@ static QuoExpr *quo__parser_call(QuoModule *m, QuoExpr *callee) {
 static QuoExpr *quo__parser_assignment_expr(QuoModule *m, QuoExpr *target) {
   QuoToken op = m->previous;
   QuoExpr *value = quo__parser_expression(m);
-
   // If assigning a function to a variable, auto-name it
   if (value && value->type == QUO_EXPR_FUNCTION) value->function.name = target->token;
-
   QuoExpr *expr = quo__expr_new(QUO_EXPR_ASSIGN, op);
   expr->assign.target = target;
   expr->assign.value = value;
@@ -2361,7 +2347,8 @@ static QuoExpr *quo__parser_id(QuoModule *m) {
   if (!quo__parser_is_declared(m, m->previous)) {
     QuoStr *key = quo_str_new_interned(m->previous.start, m->previous.len);
     QuoVar value;
-    if (quo_ht_get(&m->globals, key, &value)) return quo__parser_variable(m);
+    if (quo_ht_get(&quo__builtin_methods, key, &value)) return quo__parser_variable(m);
+    else if (quo_ht_get(&m->globals, key, &value)) return quo__parser_variable(m);
     quo__parser_error(m, m->previous, "Undefined variable '" QUO_TOKEN_FMT "'", QUO_TOKEN_ARG(m->previous));
   }
   return quo__parser_variable(m);
@@ -3269,7 +3256,8 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
     case QUO_OP_GET_GLOBAL: {
       QuoVar name_var = READ_CONST();
       QuoVar value;
-      if (quo_ht_get(&frame->function->m->globals, quo_var_as_str(&name_var), &value)) quo__vm_push(vm, value);
+      if (quo_ht_get(&quo__builtin_methods, quo_var_as_str(&name_var), &value)) quo__vm_push(vm, value);
+      else if (quo_ht_get(&frame->function->m->globals, quo_var_as_str(&name_var), &value)) quo__vm_push(vm, value);
       else return quo_var_new_err("Undefined variable");
       break;
     }
@@ -3359,7 +3347,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
       // Save the function type before dispatch (which may clean up the stack)
       QuoObjType func_type = callee->val_obj->type;
       QuoVar result = quo__vm_dispatch_call(vm, callee->val_obj, argc);
-      if (result.type == QUO_VAR_TYPE_ERROR) return result;
+      if (quo_var_is_err(&result)) return result;
       // Use the saved type instead of the now-invalid callee pointer
       if (func_type == QUO_OBJ_TYPE_FN) frame = LAST_FRAME();
       break;
@@ -3467,7 +3455,19 @@ void quo_init() {
     quo_ht_set(methods_table, cfn->name, quo_var_new_obj(cfn));                                                                            \
   } while (0)
 
-  // Register built-in methods functions
+  // Register global built-in functions
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "import", quo__builtin_import);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "type", quo__builtin_type);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "print", quo__builtin_print);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "input", quo__builtin_input);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "exit", quo__builtin_exit);
+
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "bool", quo__builtin_bool);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "num", quo__builtin_num);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "str", quo__builtin_str);
+  REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "len", quo__builtin_len);
+
+  // Register built-in methods for types
   // String
   REGISTER_BUILTIN_METHOD(&quo__str_methods, "get", quo__str_method_get);
   REGISTER_BUILTIN_METHOD(&quo__str_methods, "strip", quo__str_method_strip);
@@ -3493,6 +3493,7 @@ void quo_init() {
 }
 
 void quo_cleanup() {
+  quo_ht_free(&quo__builtin_methods);
   quo_ht_free(&quo__str_methods);
   quo_ht_free(&quo__arr_methods);
   quo_ht_free(&quo__dict_methods);
