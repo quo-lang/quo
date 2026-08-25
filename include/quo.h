@@ -3460,33 +3460,36 @@ void quo_vm_free(QuoVM *vm) {
 
 // -------------------- INIT / CLEANUP -------------------- //
 
-static inline void quo__register_builtin_method(QuoHashTable *methods, const char *name, QuoCFunctionPtr fn) {
-  QuoCFn *cfn = quo_cfunction_new(name, -1, fn);
-  quo_ht_set(methods, cfn->name, quo_var_new_obj(cfn));
-}
-
 void quo_init() {
+#define REGISTER_BUILTIN_METHOD(methods_table, method_name, fn)                                                                            \
+  do {                                                                                                                                     \
+    QuoCFn *cfn = quo_cfunction_new(method_name, -1, fn);                                                                                  \
+    quo_ht_set(methods_table, cfn->name, quo_var_new_obj(cfn));                                                                            \
+  } while (0)
+
   // Register built-in methods functions
   // String
-  quo__register_builtin_method(&quo__str_methods, "get", quo__str_method_get);
-  quo__register_builtin_method(&quo__str_methods, "strip", quo__str_method_strip);
-  quo__register_builtin_method(&quo__str_methods, "startswith", quo__str_method_startswith);
-  quo__register_builtin_method(&quo__str_methods, "endswith", quo__str_method_endswith);
-  quo__register_builtin_method(&quo__str_methods, "contains", quo__str_method_contains);
-  quo__register_builtin_method(&quo__str_methods, "split", quo__str_method_split);
-  quo__register_builtin_method(&quo__str_methods, "replace", quo__str_method_replace);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "get", quo__str_method_get);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "strip", quo__str_method_strip);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "startswith", quo__str_method_startswith);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "endswith", quo__str_method_endswith);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "contains", quo__str_method_contains);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "split", quo__str_method_split);
+  REGISTER_BUILTIN_METHOD(&quo__str_methods, "replace", quo__str_method_replace);
   // Array
-  quo__register_builtin_method(&quo__arr_methods, "get", quo__arr_method_get);
-  quo__register_builtin_method(&quo__arr_methods, "set", quo__arr_method_set);
-  quo__register_builtin_method(&quo__arr_methods, "push", quo__arr_method_push);
-  quo__register_builtin_method(&quo__arr_methods, "pop", quo__arr_method_pop);
+  REGISTER_BUILTIN_METHOD(&quo__arr_methods, "get", quo__arr_method_get);
+  REGISTER_BUILTIN_METHOD(&quo__arr_methods, "set", quo__arr_method_set);
+  REGISTER_BUILTIN_METHOD(&quo__arr_methods, "push", quo__arr_method_push);
+  REGISTER_BUILTIN_METHOD(&quo__arr_methods, "pop", quo__arr_method_pop);
   // Dictionary
-  quo__register_builtin_method(&quo__dict_methods, "get", quo__dict_method_get);
-  quo__register_builtin_method(&quo__dict_methods, "set", quo__dict_method_set);
-  quo__register_builtin_method(&quo__dict_methods, "has", quo__dict_method_has);
-  quo__register_builtin_method(&quo__dict_methods, "del", quo__dict_method_del);
-  quo__register_builtin_method(&quo__dict_methods, "keys", quo__dict_method_keys);
-  quo__register_builtin_method(&quo__dict_methods, "values", quo__dict_method_values);
+  REGISTER_BUILTIN_METHOD(&quo__dict_methods, "get", quo__dict_method_get);
+  REGISTER_BUILTIN_METHOD(&quo__dict_methods, "set", quo__dict_method_set);
+  REGISTER_BUILTIN_METHOD(&quo__dict_methods, "has", quo__dict_method_has);
+  REGISTER_BUILTIN_METHOD(&quo__dict_methods, "del", quo__dict_method_del);
+  REGISTER_BUILTIN_METHOD(&quo__dict_methods, "keys", quo__dict_method_keys);
+  REGISTER_BUILTIN_METHOD(&quo__dict_methods, "values", quo__dict_method_values);
+
+#undef REGISTER_BUILTIN_METHOD
 }
 
 void quo_cleanup() {
