@@ -77,6 +77,11 @@ static inline void *quo_arena_alloc(QuoArena *arena, size_t size) {
   return ptr;
 }
 
+static inline void quo_arena_reset(QuoArena *arena) {
+  assert(arena != NULL);
+  arena->size = arena->offset = 0;
+}
+
 static inline void quo_arena_destroy(QuoArena *arena) {
   assert(arena != NULL);
   if (arena->data) {
