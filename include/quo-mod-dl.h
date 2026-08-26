@@ -9,26 +9,6 @@ DEPENDENCIES:
 
 QUO API:
     var dl = import("dl")
-    var libm = dl.open("libm.so.6")
-
-    # Simple call (defaults to double/double)
-    var sqrt_func = libm.sym("sqrt")
-    var result = sqrt_func.call(16.0)
-
-    # Call with explicit types: sym(name, return_type, [arg_types])
-    var atoi = libm.sym("atoi", "i", ["s"])  # int return, string arg
-    var num = atoi.call("42")
-
-    # Types:
-    # "v" = void
-    # "i" = int
-    # "d" = double
-    # "f" = float
-    # "s" = string (char*)
-    # "p" = pointer
-    # "b" = bool
-
-    libm.close()
 */
 
 #ifndef QUO_MOD_DL_H
@@ -63,23 +43,66 @@ QUO_DEFINE_USER_TYPE(QuoDLSym, sym)
 
 QuoArena dl__arena = {0};
 
-// ---------- UTILS ---------- //
+// ---------- PARSING ---------- //
 
-// Parse type string to ffi_type
-static inline ffi_type *quo__mod_dl_parse_type(char c) {
+static inline ffi_type *quo__mod_dl_parse_basic_type(char c) {
   switch (c) {
-  case 'v': return &ffi_type_void;
-  case 'i': return &ffi_type_sint;
-  case 'u': return &ffi_type_uint;
-  case 'l': return &ffi_type_slong;
-  case 'd': return &ffi_type_double;
-  case 'f': return &ffi_type_float;
+  case 'i': return &ffi_type_sint;    // int
+  case 'b': return &ffi_type_sint;    // bool
+  case 'u': return &ffi_type_uint;    // unsigned int
+  case 'l': return &ffi_type_slong;   // long
+  case 'd': return &ffi_type_double;  // double
+  case 'f': return &ffi_type_float;   // float
   case 's': return &ffi_type_pointer; // char*
   case 'p': return &ffi_type_pointer; // void*
-  case 'b': return &ffi_type_sint;    // bool as int
+  case 'v': return &ffi_type_void;    // void
   default: return NULL;
   }
 }
+
+static inline ffi_type *quo__mod_dl_parse_struct_type(const char *s, int *pos) {
+  da(ffi_type *) types = {0};
+  while (s[*pos] != '}' && s[*pos] != '\0') {
+    ffi_type *t;
+    if (s[*pos] == '{') {
+      (*pos)++;
+      t = quo__mod_dl_parse_struct_type(s, pos);
+    } else t = quo__mod_dl_parse_basic_type(s[*pos]);
+    da_add(&types, t);
+    (*pos)++;
+  }
+  da_add(&types, NULL);
+  ffi_type *result = calloc(1, sizeof(ffi_type));
+  result->type = FFI_TYPE_STRUCT;
+  result->elements = types.items;
+  return result;
+}
+
+static inline ffi_type **quo__mod_dl_parse_args_string(const char *s, int *pos, int *argc) {
+  da(ffi_type *) types = {0};
+  while (s[*pos] != '\0') {
+    ffi_type *t = NULL;
+    if (s[*pos] == '{') {
+      (*pos)++;
+      t = quo__mod_dl_parse_struct_type(s, pos);
+    } else t = quo__mod_dl_parse_basic_type(s[*pos]);
+    da_add(&types, t);
+    (*pos)++;
+  }
+  *argc = types.count;
+  return types.items;
+}
+
+static inline ffi_type *quo__mod_dl_parse_return_string(const char *s, int *pos) {
+  ffi_type *t = NULL;
+  if (s[*pos] == '{') {
+    (*pos)++;
+    t = quo__mod_dl_parse_struct_type(s, pos);
+  } else t = quo__mod_dl_parse_basic_type(s[*pos]);
+  return t;
+}
+
+// ---------- CONVERSION ---------- //
 
 // Convert QuoVar to ffi type and value based on declared type
 static inline bool quo__mod_dl_var_to_ffi(QuoVar *var, ffi_type *type, void **value_ptr) {
@@ -160,55 +183,33 @@ static inline QuoVar quo__mod_dl_open(QuoModule *m, int argc, QuoVar *argv) {
 
 static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
-  if (argc < 4) return quo_var_new_err("sym() requires: symbol name, return type, and argument types array");
+  if (argc < 4) return quo_var_new_err("sym() requires: symbol name, return type string, and argument types string");
   QuoDLHandle *dl = quo_var_as_dl(&argv[0]);
   if (!quo_var_is_str(&argv[1])) return quo_var_new_err("Second argument must be a symbol name string");
   QuoStr *name = quo_var_as_str(&argv[1]);
   // Validate return type
   if (!quo_var_is_str(&argv[2])) return quo_var_new_err("Third argument must be a return type string");
-  QuoStr *ret_type_str = quo_var_as_str(&argv[2]);
-  if (ret_type_str->len == 0) return quo_var_new_err("Return type string cannot be empty");
-  ffi_type *ret_type = quo__mod_dl_parse_type(ret_type_str->data[0]);
+  if (quo_var_as_str(&argv[2])->len == 0) return quo_var_new_err("Return type string cannot be empty");
+  int ret_pos = 0;
+  ffi_type *ret_type = quo__mod_dl_parse_return_string(quo_var_as_str(&argv[2])->data, &ret_pos);
   if (!ret_type) return quo_var_new_err("Invalid return type");
-  // Validate argument types array
-  if (!quo_var_is_arr(&argv[3])) return quo_var_new_err("Fourth argument must be an array of argument type strings");
-  QuoArr *args_arr = quo_var_as_arr(&argv[3]);
-  int num_args = quo_arr_len(args_arr);
-  // Allocate and parse argument types
-  ffi_type **arg_types = NULL;
-  if (num_args > 0) {
-    arg_types = quo_alloc(NULL, sizeof(ffi_type *) * num_args);
-    for (int i = 0; i < num_args; i++) {
-      QuoVar arg_type_var = quo_arr_get(args_arr, i);
-      if (!quo_var_is_str(&arg_type_var)) {
-        quo_dealloc(arg_types);
-        return quo_var_new_err("Argument type must be a string");
-      }
-      QuoStr *type_str = quo_var_as_str(&arg_type_var);
-      if (type_str->len == 0) {
-        quo_dealloc(arg_types);
-        return quo_var_new_err("Argument type string cannot be empty");
-      }
-      ffi_type *type = quo__mod_dl_parse_type(type_str->data[0]);
-      if (!type) {
-        quo_dealloc(arg_types);
-        return quo_var_new_err("Invalid argument type");
-      }
-      arg_types[i] = type;
-    }
-  }
+  if (!quo_var_is_str(&argv[3])) return quo_var_new_err("Fourth argument must be arguments type strings");
+  if (quo_var_as_str(&argv[3])->len == 0) return quo_var_new_err("Argument types string cannot be empty");
+  // Get args
+  int arg_pos = 0;
+  int num_args = 0;
+  ffi_type **arg_types = quo__mod_dl_parse_args_string(quo_var_as_str(&argv[3])->data, &arg_pos, &num_args);
   // Clear any existing error
   dlerror();
   void *sym = dlsym(dl->handle, name->data);
-  char *error = dlerror();
-  if (error) {
-    quo_dealloc(arg_types);
-    return quo_var_new_err(error);
+  if (!sym) {
+    // quo_dealloc(arg_types);
+    return quo_var_new_err(dlerror());
   }
   // Create and initialize QuoDLSym object
   QuoDLSym *result = (QuoDLSym *)quo_type_get_instance("QuoDLSym");
   if (!result) {
-    quo_dealloc(arg_types);
+    // quo_dealloc(arg_types);
     return quo_var_new_err("Failed to get QuoDLSym instance");
   }
   result->sym = sym;
