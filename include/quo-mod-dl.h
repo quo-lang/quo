@@ -68,7 +68,7 @@ static inline ffi_type *quo__mod_dl_parse_struct_type(const char *s, int *pos) {
       (*pos)++;
       t = quo__mod_dl_parse_struct_type(s, pos);
     } else t = quo__mod_dl_parse_basic_type(s[*pos]);
-    da_add(&types, t);
+    if (t) da_add(&types, t);
     (*pos)++;
   }
   da_add(&types, NULL);
@@ -86,7 +86,7 @@ static inline ffi_type **quo__mod_dl_parse_args_string(const char *s, int *pos, 
       (*pos)++;
       t = quo__mod_dl_parse_struct_type(s, pos);
     } else t = quo__mod_dl_parse_basic_type(s[*pos]);
-    da_add(&types, t);
+    if (t) da_add(&types, t);
     (*pos)++;
   }
   *argc = types.count;
@@ -102,23 +102,52 @@ static inline ffi_type *quo__mod_dl_parse_return_string(const char *s, int *pos)
   return t;
 }
 
+static inline void quo__mod_dl_args_free(ffi_type **args, int argc) {
+  if (argc == -1) {
+    for (ffi_type *arg = *args; arg; arg++)
+      if (arg->type == FFI_TYPE_STRUCT) {
+        quo__mod_dl_args_free(arg->elements, -1);
+        quo_dealloc(arg); // struct ffi_type is allocated on the heap by quo__mod_dl_parse_struct_type
+      }
+    quo_dealloc(args); // args is dynamic array
+  } else {
+    for (int i = 0; i < argc; i++)
+      if (args[i]->type == FFI_TYPE_STRUCT) {
+        quo__mod_dl_args_free(args[i]->elements, -1);
+        quo_dealloc(args[i]); // struct ffi_type is allocated on the heap by quo__mod_dl_parse_struct_type
+      }
+    quo_dealloc(args); // args is dynamic array
+  }
+}
+
 // ---------- CONVERSION ---------- //
+
+#define quo_dtob(x)   ((x) != 0 ? true : false)
+#define quo_dtof(x)   ((x) > FLT_MAX ? FLT_MAX : (x) < FLT_MIN ? FLT_MIN : (float)(x))
+#define quo_dtos(x)   ((x) > SHRT_MAX ? SHRT_MAX : (x) < SHRT_MIN ? SHRT_MIN : (short)(x))
+#define quo_dtoi(x)   ((x) > INT_MAX ? INT_MAX : (x) < INT_MIN ? INT_MIN : (int)(x))
+#define quo_dtoui(x)  ((x) > UINT_MAX ? UINT_MAX : (x) < 0 ? 0 : (unsigned int)(x))
+#define quo_dtol(x)   ((x) > LONG_MAX ? LONG_MAX : (x) < LONG_MIN ? LONG_MIN : (long)(x))
+#define quo_dtoul(x)  ((x) > ULONG_MAX ? ULONG_MAX : (x) < 0 ? 0 : (unsigned long)(x))
+#define quo_dtoll(x)  ((x) > LLONG_MAX ? LLONG_MAX : (x) < LLONG_MIN ? LLONG_MIN : (long long)(x))
+#define quo_dtoull(x) ((x) > ULLONG_MAX ? ULLONG_MAX : (x) < 0 ? 0 : (unsigned long long)(x))
 
 // Convert QuoVar to ffi type and value based on declared type
 static inline bool quo__mod_dl_var_to_ffi(QuoVar *var, ffi_type *type, void **value_ptr) {
+  static float float_val;
+  static int int_val;
+  static unsigned int uint_val;
+  static long long_val;
+  static void *null_ptr = NULL;
   // Handle based on the declared type
   if (type == &ffi_type_double) {
     if (!quo_var_is_num(var)) return false;
     *value_ptr = &var->val_num;
   } else if (type == &ffi_type_float) {
-    static float float_val;
     if (!quo_var_is_num(var)) return false;
     float_val = (float)var->val_num;
     *value_ptr = &float_val;
   } else if (type == &ffi_type_sint || type == &ffi_type_uint || type == &ffi_type_slong) {
-    static int int_val;
-    static unsigned int uint_val;
-    static long long_val;
     if (quo_var_is_num(var)) {
       if (type == &ffi_type_sint) {
         int_val = (int)var->val_num;
@@ -145,17 +174,10 @@ static inline bool quo__mod_dl_var_to_ffi(QuoVar *var, ffi_type *type, void **va
       return false;
     }
   } else if (type == &ffi_type_pointer) {
-    if (quo_var_is_str(var)) {
-      QuoStr *str = quo_var_as_str(var);
-      *value_ptr = &str->data;
-    } else if (quo_var_is_nil(var)) {
-      static void *null_ptr = NULL;
-      *value_ptr = &null_ptr;
-    } else if (quo_var_is_obj(var)) {
-      *value_ptr = &var->val_obj;
-    } else {
-      return false;
-    }
+    if (quo_var_is_str(var)) *value_ptr = &quo_var_as_str(var)->data;
+    else if (quo_var_is_nil(var)) *value_ptr = &null_ptr;
+    else if (quo_var_is_obj(var)) *value_ptr = &var->val_obj;
+    else return false;
   } else {
     return false;
   }
@@ -172,7 +194,12 @@ static inline QuoVar quo__mod_dl_open(QuoModule *m, int argc, QuoVar *argv) {
   for (int i = 0; i < argc; i++) {
     if (!quo_var_is_str(&argv[i])) continue;
     QuoStr *name = quo_var_as_str(&argv[i]);
-    void *handle = dlopen(name->data, RTLD_LAZY);
+    void *handle = NULL;
+    if (quo_strprefix(name->data, "./")) {
+      char *path = quo_strdupf("%s/%s", m->cwd, name->data + 2);
+      handle = dlopen(path, RTLD_LAZY);
+      quo_dealloc(path);
+    } else handle = dlopen(name->data, RTLD_LAZY);
     if (!handle) continue;
     dl->handle = handle;
     break;
@@ -199,6 +226,7 @@ static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
   int arg_pos = 0;
   int num_args = 0;
   ffi_type **arg_types = quo__mod_dl_parse_args_string(quo_var_as_str(&argv[3])->data, &arg_pos, &num_args);
+  if (arg_types[0] == &ffi_type_void) num_args = 0;
   // Clear any existing error
   dlerror();
   void *sym = dlsym(dl->handle, name->data);
@@ -219,7 +247,12 @@ static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
   return quo_var_new_obj(result);
 }
 
-static inline QuoVar quo__mod_dl_close(QuoModule *m, int argc, QuoVar *argv) {
+static inline void quo__mod_dl_sym_free(QuoDLSym *s) {
+  quo__mod_dl_args_free(s->arg_types, s->num_args);
+  quo_dealloc(s->return_type);
+}
+
+static inline QuoVar quo__mod_dl_sym_close(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
   QUO_UNUSED(argc);
   QuoDLHandle *dl = quo_var_as_dl(&argv[0]);
@@ -317,15 +350,22 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
   return quo_var_new_err("Unsupported return type");
 }
 
+static inline void quo__mod_dl_cleanup(QuoModule *m) {
+  QUO_UNUSED(m);
+  quo_arena_destroy(&dl__arena);
+}
+
 // ---------- PUBLIC API ---------- //
 
 static inline void quo_mod_dl_init(QuoModule *parent) {
-  QuoModule *m = quo_module_new(parent->cwd, "dl", NULL, NULL);
+  dl__arena = quo_arena_create(1024);
+
+  QuoModule *m = quo_module_new(parent->cwd, "dl", NULL, quo__mod_dl_cleanup);
   quo_module_register_cfn(m, "open", -1, quo__mod_dl_open);
 
   QuoObj *dl_handle_type = quo_type_register("QuoDLHandle", sizeof(QuoDLHandle));
   quo_type_add_cfn(dl_handle_type, "sym", -1, quo__mod_dl_sym);
-  quo_type_add_cfn(dl_handle_type, "close", -1, quo__mod_dl_close);
+  quo_type_add_cfn(dl_handle_type, "close", -1, quo__mod_dl_sym_close);
 
   QuoObj *dl_sym_type = quo_type_register("QuoDLSym", sizeof(QuoDLSym));
   quo_type_add_cfn(dl_sym_type, "call", -1, quo__mod_dl_call);

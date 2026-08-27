@@ -657,13 +657,22 @@ void quo_dealloc(void *ptr) {
 
 // -------------------- UTILS -------------------- //
 
-bool quo_strsuffix(const char *str, const char *suffix) {
+static inline bool quo_strsuffix(const char *str, const char *suffix) {
   if (str == NULL) return false;
   if (suffix == NULL) return true;
   size_t str_len = strlen(str);
   size_t suffix_len = strlen(suffix);
   if (str_len < suffix_len) return false;
-  return strcmp(str + str_len - suffix_len, suffix) == 0;
+  return memcmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+static inline bool quo_strprefix(const char *str, const char *prefix) {
+  if (str == NULL) return false;
+  if (prefix == NULL) return true;
+  size_t str_len = strlen(str);
+  size_t prefix_len = strlen(prefix);
+  if (str_len < prefix_len) return false;
+  return memcmp(str, prefix, prefix_len) == 0;
 }
 
 char *quo_strndup(const char *str, int len) {
@@ -1550,8 +1559,7 @@ static QuoVar quo__str_method_startswith(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("startswith() requires a string argument");
   QuoStr *str = quo_var_as_str(&argv[0]);
   QuoStr *prefix = quo_var_as_str(&argv[1]);
-  if (prefix->len > str->len) return quo_var_new_bool(false);
-  return quo_var_new_bool(memcmp(str->data, prefix->data, prefix->len) == 0);
+  return quo_var_new_bool(quo_strprefix(str->data, prefix->data));
 }
 // Check if string ends with suffix
 static QuoVar quo__str_method_endswith(QuoModule *m, int argc, QuoVar *argv) {
@@ -1559,8 +1567,7 @@ static QuoVar quo__str_method_endswith(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("endswith() requires a string argument");
   QuoStr *str = quo_var_as_str(&argv[0]);
   QuoStr *suffix = quo_var_as_str(&argv[1]);
-  if (suffix->len > str->len) return quo_var_new_bool(false);
-  return quo_var_new_bool(memcmp(str->data + str->len - suffix->len, suffix->data, suffix->len) == 0);
+  return quo_var_new_bool(quo_strsuffix(str->data, suffix->data));
 }
 // Check if string contains substring
 static QuoVar quo__str_method_contains(QuoModule *m, int argc, QuoVar *argv) {
@@ -3204,7 +3211,7 @@ QuoVar quo_vm_run(QuoVM *vm, QuoFn *fn) {
     }
     case QUO_OP_NOT: {
       QuoVar *value = quo__vm_peek(vm, 0);
-      if (quo_var_is_bool(value)) value->val_num = value->val_num > 0 ? false : true;
+      if (quo_var_is_bool(value) || quo_var_is_num(value)) value->val_num = value->val_num > 0 ? false : true;
       else if (quo_var_is_nil(value)) value->val_num = true;
       else return quo_var_new_err("Type don't support logical negation");
       break;
