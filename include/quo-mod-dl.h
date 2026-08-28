@@ -32,9 +32,7 @@ QUO_DEFINE_USER_TYPE(QuoDLHandle, dl)
 typedef struct {
   QuoObj obj;
   void *sym;
-  ffi_type *return_type;
-  ffi_type **arg_types;
-  int num_args;
+  ffi_cif cif;
 } QuoDLSym;
 
 QUO_DEFINE_USER_TYPE(QuoDLSym, sym)
@@ -119,6 +117,8 @@ static inline void quo__mod_dl_args_free(ffi_type **args, int argc) {
     quo_dealloc(args); // args is dynamic array
   }
 }
+
+// static inline void quo__mod_dl_arg_size(ffi_type *arg, int *sizeb) {}
 
 // ---------- CONVERSION ---------- //
 
@@ -208,6 +208,14 @@ static inline QuoVar quo__mod_dl_open(QuoModule *m, int argc, QuoVar *argv) {
   return quo_var_new_obj(dl);
 }
 
+static inline void quo__mod_dl_sym_free(QuoDLSym *s) {
+  quo__mod_dl_args_free(s->cif.arg_types, s->cif.nargs);
+  if (s->cif.rtype->type == FFI_TYPE_STRUCT) {
+    quo__mod_dl_args_free(s->cif.rtype->elements, -1);
+    quo_dealloc(s->cif.rtype);
+  }
+}
+
 static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
   QUO_UNUSED(m);
   if (argc < 4) return quo_var_new_err("sym() requires: symbol name, return type string, and argument types string");
@@ -224,32 +232,26 @@ static inline QuoVar quo__mod_dl_sym(QuoModule *m, int argc, QuoVar *argv) {
   if (quo_var_as_str(&argv[3])->len == 0) return quo_var_new_err("Argument types string cannot be empty");
   // Get args
   int arg_pos = 0;
-  int num_args = 0;
-  ffi_type **arg_types = quo__mod_dl_parse_args_string(quo_var_as_str(&argv[3])->data, &arg_pos, &num_args);
-  if (arg_types[0] == &ffi_type_void) num_args = 0;
-  // Clear any existing error
-  dlerror();
+  int nargs = 0;
+  ffi_type **args_types = quo__mod_dl_parse_args_string(quo_var_as_str(&argv[3])->data, &arg_pos, &nargs);
+  if (args_types[0] == &ffi_type_void) nargs = 0;
   void *sym = dlsym(dl->handle, name->data);
   if (!sym) {
     // quo_dealloc(arg_types);
     return quo_var_new_err(dlerror());
   }
-  // Create and initialize QuoDLSym object
-  QuoDLSym *result = (QuoDLSym *)quo_type_get_instance("QuoDLSym");
-  if (!result) {
+  QuoDLSym *symbol = (QuoDLSym *)quo_type_get_instance("QuoDLSym");
+  if (!symbol) {
     // quo_dealloc(arg_types);
     return quo_var_new_err("Failed to get QuoDLSym instance");
   }
-  result->sym = sym;
-  result->return_type = ret_type;
-  result->arg_types = arg_types;
-  result->num_args = num_args;
-  return quo_var_new_obj(result);
-}
-
-static inline void quo__mod_dl_sym_free(QuoDLSym *s) {
-  quo__mod_dl_args_free(s->arg_types, s->num_args);
-  quo_dealloc(s->return_type);
+  symbol->sym = sym;
+  ffi_status status = ffi_prep_cif(&symbol->cif, FFI_DEFAULT_ABI, nargs, ret_type, args_types);
+  if (status != FFI_OK) {
+    quo__mod_dl_sym_free(symbol);
+    return quo_var_new_err("Failed to prepare ffi call");
+  }
+  return quo_var_new_obj(symbol);
 }
 
 static inline QuoVar quo__mod_dl_sym_close(QuoModule *m, int argc, QuoVar *argv) {
@@ -268,7 +270,7 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
   QuoDLSym *func = (QuoDLSym *)quo_var_as_obj(&argv[0]);
   void (*fn_ptr)() = (void (*)())func->sym;
 
-  int expected_args = func->num_args;
+  int expected_args = func->cif.nargs;
   int provided_args = argc - 1; // Remove function object from args
   if (expected_args != provided_args) return quo_var_new_err("Argument count mismatch");
 
@@ -279,7 +281,7 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
     arg_types = quo_alloc(NULL, sizeof(ffi_type *) * provided_args);
     arg_values = quo_alloc(NULL, sizeof(void *) * provided_args);
     for (int i = 0; i < provided_args; i++) {
-      ffi_type *type = (func->arg_types) ? func->arg_types[i] : &ffi_type_double;
+      ffi_type *type = (func->cif.arg_types) ? func->cif.arg_types[i] : &ffi_type_double;
       if (!quo__mod_dl_var_to_ffi(&argv[i + 1], type, &arg_values[i])) {
         quo_dealloc(arg_types);
         quo_dealloc(arg_values);
@@ -289,55 +291,45 @@ static inline QuoVar quo__mod_dl_call(QuoModule *m, int argc, QuoVar *argv) {
     }
   }
 
-  // Prepare ffi call interface
-  ffi_cif cif;
-  ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, provided_args, func->return_type, arg_types);
-
-  if (status != FFI_OK) {
-    quo_dealloc(arg_types);
-    quo_dealloc(arg_values);
-    return quo_var_new_err("Failed to prepare ffi call");
-  }
-
   // Call the function and handle return type
-  if (func->return_type == &ffi_type_void) {
-    ffi_call(&cif, fn_ptr, NULL, arg_values);
+  if (func->cif.rtype == &ffi_type_void) {
+    ffi_call(&func->cif, fn_ptr, NULL, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     return quo_var_new_nil();
-  } else if (func->return_type == &ffi_type_double) {
+  } else if (func->cif.rtype == &ffi_type_double) {
     double result;
-    ffi_call(&cif, fn_ptr, &result, arg_values);
+    ffi_call(&func->cif, fn_ptr, &result, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     return quo_var_new_num(result);
-  } else if (func->return_type == &ffi_type_float) {
+  } else if (func->cif.rtype == &ffi_type_float) {
     float result;
-    ffi_call(&cif, fn_ptr, &result, arg_values);
+    ffi_call(&func->cif, fn_ptr, &result, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     return quo_var_new_num((double)result);
-  } else if (func->return_type == &ffi_type_sint) {
+  } else if (func->cif.rtype == &ffi_type_sint) {
     int result;
-    ffi_call(&cif, fn_ptr, &result, arg_values);
+    ffi_call(&func->cif, fn_ptr, &result, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     return quo_var_new_num((double)result);
-  } else if (func->return_type == &ffi_type_uint) {
+  } else if (func->cif.rtype == &ffi_type_uint) {
     unsigned int result;
-    ffi_call(&cif, fn_ptr, &result, arg_values);
+    ffi_call(&func->cif, fn_ptr, &result, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     return quo_var_new_num((double)result);
-  } else if (func->return_type == &ffi_type_slong) {
+  } else if (func->cif.rtype == &ffi_type_slong) {
     long result;
-    ffi_call(&cif, fn_ptr, &result, arg_values);
+    ffi_call(&func->cif, fn_ptr, &result, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     return quo_var_new_num((double)result);
-  } else if (func->return_type == &ffi_type_pointer) {
+  } else if (func->cif.rtype == &ffi_type_pointer) {
     void *result;
-    ffi_call(&cif, fn_ptr, &result, arg_values);
+    ffi_call(&func->cif, fn_ptr, &result, arg_values);
     quo_dealloc(arg_types);
     quo_dealloc(arg_values);
     if (result == NULL) return quo_var_new_nil();
