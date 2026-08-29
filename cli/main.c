@@ -2,17 +2,12 @@
 #include "../include/quo.h"
 
 // Include modules
-#include "../include/quo-mod-base64.h"
 #include "../include/quo-mod-csv.h"
 #include "../include/quo-mod-dl.h"
-#include "../include/quo-mod-env.h"
 #include "../include/quo-mod-fs.h"
 #include "../include/quo-mod-json.h"
 #include "../include/quo-mod-math.h"
 #include "../include/quo-mod-net.h"
-#include "../include/quo-mod-os.h"
-#include "../include/quo-mod-time.h"
-#include "../include/quo-mod-uuid.h"
 
 // #include "formatter.h"
 
@@ -44,7 +39,6 @@
 // }
 
 static int quo__run(const char *path) {
-  quo_init();
 
   char *source = NULL;
   char *cwd = NULL;
@@ -70,6 +64,8 @@ static int quo__run(const char *path) {
     cwd = quo_dirname(path);
   }
 
+  quo_init(cwd);
+
   QuoModule *m = quo_module_new(cwd, display_path, source, NULL);
   quo_dealloc(source);
   quo_dealloc(cwd);
@@ -79,17 +75,12 @@ static int quo__run(const char *path) {
   if (!m) return 1;
 
   // Load modules
-  quo_mod_base64_init(m);
   quo_mod_csv_init(m);
   quo_mod_dl_init(m);
-  quo_mod_env_init(m);
   quo_mod_fs_init(m);
   quo_mod_json_init(m);
   quo_mod_math_init(m);
   quo_mod_net_init(m);
-  quo_mod_os_init(m);
-  quo_mod_time_init(m);
-  quo_mod_uuid_init(m);
 
   int exit_code = 0;
   QuoVar result = quo_module_run(m);

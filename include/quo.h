@@ -13,6 +13,7 @@
 #include <time.h>
 
 #ifdef _WIN32
+#include <wincrypt.h>
 #include <windows.h>
 #define RTLD_LAZY             0
 #define dlopen(path, flags)   LoadLibraryA(path)
@@ -21,6 +22,7 @@
 #define dlerror()             "Windows error"
 #else
 #include <dlfcn.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -514,7 +516,7 @@ QuoVar quo_var_to_str(QuoVar *v);
 int quo_var_len(QuoVar *v);
 int quo_var_print(QuoVar *v);
 
-void quo_init();
+void quo_init(const char *cwd);
 void quo_cleanup();
 
 // ------------------------------------------------------------------------------------------ //
@@ -547,7 +549,7 @@ typedef enum {
   QUO_OP_POP,
   QUO_OP_CONSTANT,
   QUO_OP_ARRAY,
-  QUO_OP_DICT, // Create dictionary
+  QUO_OP_DICT,
   QUO_OP_MEMBER_ACCESS,
   QUO_OP_SET_MEMBER,
   QUO_OP_NEGATE,
@@ -916,184 +918,6 @@ void quo_ht_free(QuoHashTable *t) {
   da_free(t);
 }
 
-// -------------------- LEXER -------------------- //
-
-static enum QuoTokenType quo__keywords[] = {
-    QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_WHILE, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
-    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,   QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN,
-};
-static enum QuoTokenType quo__single_char_symbols[] = {
-    QUO_TT_DOT,   QUO_TT_OPAREN, QUO_TT_CPAREN, QUO_TT_OBRACE, QUO_TT_CBRACE,   QUO_TT_OBRACKET, QUO_TT_CBRACKET,
-    QUO_TT_COMMA, QUO_TT_COLON,  QUO_TT_EQ,     QUO_TT_LT,     QUO_TT_GT,       QUO_TT_PLUS,     QUO_TT_MINUS,
-    QUO_TT_STAR,  QUO_TT_SLASH,  QUO_TT_BANG,   QUO_TT_MOD,    QUO_TT_QUESTION,
-};
-static enum QuoTokenType quo__compound_symbols[] = {
-    QUO_TT_BANGEQ, QUO_TT_DOUBLEEQ, QUO_TT_GTEQ, QUO_TT_LTEQ, QUO_TT_PLUSEQ, QUO_TT_MINUSEQ, QUO_TT_MULEQ, QUO_TT_DIVEQ,
-};
-
-static inline char quo__lexer_peek(QuoModule *m, int offset) { return m->source[m->pos + offset]; }
-static inline void quo__lexer_advance(QuoModule *m) {
-  m->pos++;
-  if (quo__lexer_peek(m, 0) == '\n') m->line++, m->column = 1;
-  else m->column++;
-}
-static QuoToken quo__lexer_next_token(QuoModule *m) {
-  QuoToken t = {.type = QUO_TT_EOF, .line = m->line, .column = m->column};
-  while (quo__lexer_peek(m, 0) != '\0') {
-    // Skip whitespace
-    if (quo__is_space(quo__lexer_peek(m, 0))) quo__lexer_advance(m);
-    // Line comments
-    else if (!strncmp(m->source + m->pos, quo_token_type_str(QUO_TT_COMMENT), strlen(quo_token_type_str(QUO_TT_COMMENT)))) {
-      while (quo__lexer_peek(m, 0) != '\n' && quo__lexer_peek(m, 0) != '\0') quo__lexer_advance(m);
-      continue;
-    }
-    // Identifier or keyword
-    else if (quo__is_alpha(quo__lexer_peek(m, 0))) {
-      t.type = QUO_TT_ID;
-      size_t start = m->pos;
-      while (quo__is_alphanumeric(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
-      t.start = m->source + start;
-      t.len = m->pos - start;
-      // Find keywords
-      for (int i = 0; i < quo__static_array_size(quo__keywords); ++i) {
-        int len = (int)strlen(quo_token_type_str(quo__keywords[i]));
-        if (len == t.len && memcmp(t.start, quo_token_type_str(quo__keywords[i]), len) == 0) {
-          t.type = quo__keywords[i];
-          break;
-        }
-      }
-      break;
-    }
-    // Number
-    else if (quo__is_digit(quo__lexer_peek(m, 0))) {
-      t.type = QUO_TT_LITERAL_NUM;
-      size_t start = m->pos;
-      t.start = m->source + start;
-      // Integer part
-      while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
-      // Float part
-      if (quo__lexer_peek(m, 0) == '.' && quo__lexer_peek(m, 1) != '\0' && quo__is_digit(quo__lexer_peek(m, 1))) {
-        quo__lexer_advance(m); // Skip '.'
-        while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
-      }
-      t.len = m->pos - start;
-      break;
-    }
-    // String
-    else if (quo__lexer_peek(m, 0) == '"') {
-      t.type = QUO_TT_LITERAL_STR;
-      quo__lexer_advance(m); // Skip '"'
-      size_t start = m->pos;
-      t.start = m->source + start;
-      while (quo__lexer_peek(m, 0) != '\0') {
-        if (quo__lexer_peek(m, 0) == '"') {
-          if (quo__lexer_peek(m, -1) == '\\') {
-            quo__lexer_advance(m);
-            continue;
-          }
-          t.len = m->pos - start;
-          break;
-        }
-        quo__lexer_advance(m);
-      }
-      if (quo__lexer_peek(m, 0) == '"') quo__lexer_advance(m);
-      else t.type = QUO_TT_ERROR, t.error_msg = "Unterminated string";
-      break;
-    }
-    // Symbol
-    else if (!quo__is_alphanumeric(quo__lexer_peek(m, 0))) {
-      // Check for compound symbols first
-      if (quo__lexer_peek(m, 1) != '\0') {
-        char two_char[3] = {quo__lexer_peek(m, 0), quo__lexer_peek(m, 1), '\0'};
-        for (int i = 0; i < quo__static_array_size(quo__compound_symbols); ++i)
-          if (!strcmp(two_char, quo_token_type_str(quo__compound_symbols[i]))) {
-            t.type = quo__compound_symbols[i];
-            t.start = m->source + m->pos;
-            t.len = 2;
-            quo__lexer_advance(m);
-            quo__lexer_advance(m);
-            break;
-          }
-      }
-      // If not a two-char symbol, check single-char symbols
-      if (t.type == QUO_TT_EOF) { // Only if we haven't matched a compound symbol
-        char single_char[2] = {quo__lexer_peek(m, 0), '\0'};
-        for (int i = 0; i < quo__static_array_size(quo__single_char_symbols); ++i)
-          if (!strcmp(single_char, quo_token_type_str(quo__single_char_symbols[i]))) {
-            t.type = quo__single_char_symbols[i];
-            t.start = m->source + m->pos;
-            t.len = 1;
-            quo__lexer_advance(m);
-            break;
-          }
-      }
-      break;
-    }
-    // Unknown token
-    else {
-      t.type = QUO_TT_ERROR;
-      t.error_msg = "Unknown token";
-    }
-  }
-  return t;
-}
-
-bool quo_tokens_eq(QuoToken t1, QuoToken t2) { return t1.len != t2.len ? false : memcmp(t1.start, t2.start, t1.len) == 0; }
-
-const char *quo_token_type_str(enum QuoTokenType t) {
-  const char *str = NULL;
-  switch (t) {
-  case QUO_TT_NONE:
-  case QUO_TT_EOF:
-  case QUO_TT_ERROR:
-  case QUO_TT_ID:
-  case QUO_TT_LITERAL_NUM:
-  case QUO_TT_LITERAL_STR: break;
-  case QUO_TT_COMMENT: str = "#"; break;
-  case QUO_TT_VAR: str = "var"; break;
-  case QUO_TT_FN: str = "fn"; break;
-  case QUO_TT_WHILE: str = "while"; break;
-  case QUO_TT_BREAK: str = "break"; break;
-  case QUO_TT_CONTINUE: str = "continue"; break;
-  case QUO_TT_IF: str = "if"; break;
-  case QUO_TT_ELSE: str = "else"; break;
-  case QUO_TT_TRUE: str = "true"; break;
-  case QUO_TT_FALSE: str = "false"; break;
-  case QUO_TT_NIL: str = "nil"; break;
-  case QUO_TT_AND: str = "and"; break;
-  case QUO_TT_OR: str = "or"; break;
-  case QUO_TT_RETURN: str = "return"; break;
-  case QUO_TT_DOT: str = "."; break;
-  case QUO_TT_OPAREN: str = "("; break;
-  case QUO_TT_CPAREN: str = ")"; break;
-  case QUO_TT_OBRACE: str = "{"; break;
-  case QUO_TT_CBRACE: str = "}"; break;
-  case QUO_TT_OBRACKET: str = "["; break;
-  case QUO_TT_CBRACKET: str = "]"; break;
-  case QUO_TT_COMMA: str = ","; break;
-  case QUO_TT_COLON: str = ":"; break;
-  case QUO_TT_EQ: str = "="; break;
-  case QUO_TT_LT: str = "<"; break;
-  case QUO_TT_GT: str = ">"; break;
-  case QUO_TT_PLUS: str = "+"; break;
-  case QUO_TT_MINUS: str = "-"; break;
-  case QUO_TT_STAR: str = "*"; break;
-  case QUO_TT_SLASH: str = "/"; break;
-  case QUO_TT_BANG: str = "!"; break;
-  case QUO_TT_MOD: str = "%"; break;
-  case QUO_TT_QUESTION: str = "?"; break;
-  case QUO_TT_BANGEQ: str = "!="; break;
-  case QUO_TT_DIVEQ: str = "/="; break;
-  case QUO_TT_DOUBLEEQ: str = "=="; break;
-  case QUO_TT_GTEQ: str = ">="; break;
-  case QUO_TT_LTEQ: str = "<="; break;
-  case QUO_TT_MINUSEQ: str = "-="; break;
-  case QUO_TT_MULEQ: str = "*="; break;
-  case QUO_TT_PLUSEQ: str = "+="; break;
-  }
-  return str;
-}
-
 // ---------- VAR FUNCTIONS ---------- //
 
 void quo_var_ref(QuoVar *v) {
@@ -1389,6 +1213,8 @@ void quo_arr_set(QuoArr *arr, int index, QuoVar value) {
 }
 int quo_arr_len(QuoArr *arr) { return da_count(&arr->arr); }
 
+// --- CFN FUNCTIONS --- //
+
 QuoCFn *quo_cfunction_new(const char *name, int name_len, QuoCFunctionPtr ptr) {
   QuoCFn *fn = (QuoCFn *)quo_obj_new(sizeof(QuoCFn));
   fn->obj.type = QUO_OBJ_TYPE_CFN;
@@ -1398,27 +1224,408 @@ QuoCFn *quo_cfunction_new(const char *name, int name_len, QuoCFunctionPtr ptr) {
   return fn;
 }
 
-// --- MODULE FUNCTIONS --- //
+// ---------- BUILT-IN MODULES ---------- //
 
-// - BUILT-IN FUNCTIONS - //
+// --- MODULE OS --- //
 
-// Find existing module
-static QuoModule *quo__mod_exists(const char *path) {
-  QuoStr *mod_name = quo_str_new_interned(path, -1);
-  QuoVar value;
-  if (!quo_ht_get(&quo__imported_modules, mod_name, &value)) return NULL;
-  return quo_var_as_module(&value);
+// Run a system command and return the result
+static QuoVar quo__mod_os_system(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1) return quo_var_new_err("os.system() takes command string");
+  return quo_var_new_num(system(quo_var_as_str(&argv[0])->data));
 }
+
+static inline void quo__mod_os_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "os", NULL, NULL);
+  quo_module_register_cfn(m, "system", -1, quo__mod_os_system);
+
+  const char *name = NULL;
+#if defined(__linux__)
+  name = "linux";
+#elif defined(_WIN32)
+  name = "windows";
+#elif defined(__APPLE__) && defined(__MACH__)
+  name = "macos";
+#else
+  name = "unknown";
+#endif
+  quo_module_register_var(m, quo_str_new_interned("name", -1), quo_var_new_obj(quo_str_new_interned(name, -1)));
+}
+
+// --- MODULE TIME --- //
+
+// Sleep for N seconds
+static QuoVar quo__mod_time_sleep(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("time.sleep() takes number of seconds");
+  int64_t sec = (int64_t)argv[0].val_num;
+  if (sec < 0) sec = 0;
+#ifdef _WIN32
+  Sleep(sec * 1000);
+#else
+  sleep(sec);
+#endif
+  return quo_var_new_nil();
+}
+
+// Get current time in seconds since epoch
+static QuoVar quo__mod_time_now(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argv);
+  if (argc != 0) return quo_var_new_err("time.now() takes no arguments");
+  return quo_var_new_num((double)time(NULL));
+}
+
+// Get clock for benchmarking
+static QuoVar quo__mod_time_clock(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argv);
+  if (argc != 0) return quo_var_new_err("time.clock() takes no arguments");
+  return quo_var_new_num((double)clock() / CLOCKS_PER_SEC);
+}
+
+static inline void quo__mod_time_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "time", NULL, NULL);
+  quo_module_register_cfn(m, "sleep", -1, quo__mod_time_sleep);
+  quo_module_register_cfn(m, "now", -1, quo__mod_time_now);
+  quo_module_register_cfn(m, "clock", -1, quo__mod_time_clock);
+}
+
+// --- MODULE BASE64 --- //
+
+static int quo__mod_base64_decode_char(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+' || c == '-') return 62;
+  if (c == '/' || c == '_') return 63;
+  return -1;
+}
+
+static QuoVar quo__mod_base64_encode_impl(const char *input, int len, const char *table) {
+  QuoStringBuilder sb = quo_sb_new();
+  for (int i = 0; i < len; i += 3) {
+    int remaining = len - i;
+    unsigned char a = input[i];
+    unsigned char b = (remaining > 1) ? input[i + 1] : 0;
+    unsigned char c = (remaining > 2) ? input[i + 2] : 0;
+    unsigned int triple = (a << 16) | (b << 8) | c;
+    da_add(&sb, table[(triple >> 18) & 0x3F]);
+    da_add(&sb, table[(triple >> 12) & 0x3F]);
+    if (remaining >= 2) da_add(&sb, table[(triple >> 6) & 0x3F]);
+    else da_add(&sb, '=');
+    if (remaining >= 3) da_add(&sb, table[triple & 0x3F]);
+    else da_add(&sb, '=');
+  }
+  quo_sb_null_terminate(&sb);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
+  quo_sb_free(&sb);
+  return quo_var_new_obj(result);
+}
+
+static QuoVar quo__mod_base64_decode_impl(const char *input, int len) {
+  QuoStringBuilder sb = quo_sb_new();
+  int padding = 0;
+  if (len > 0 && input[len - 1] == '=') padding++;
+  if (len > 1 && input[len - 2] == '=') padding++;
+
+  for (int i = 0; i < len; i += 4) {
+    unsigned char sextet[4] = {0};
+    int valid_sextets = 0;
+    for (int j = 0; j < 4 && (i + j) < len; j++) {
+      char c = input[i + j];
+      if (c == '=') sextet[j] = 0;
+      else {
+        int val = quo__mod_base64_decode_char(c);
+        if (val < 0) {
+          quo_sb_free(&sb);
+          return quo_var_new_err("Invalid base64 character");
+        }
+        sextet[j] = val;
+        valid_sextets++;
+      }
+    }
+    unsigned int triple = (sextet[0] << 18) | (sextet[1] << 12) | (sextet[2] << 6) | sextet[3];
+    da_add(&sb, (triple >> 16) & 0xFF);
+    if (valid_sextets >= 3) da_add(&sb, (triple >> 8) & 0xFF);
+    if (valid_sextets >= 4) da_add(&sb, triple & 0xFF);
+  }
+  quo_sb_null_terminate(&sb);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
+  quo_sb_free(&sb);
+  return quo_var_new_obj(result);
+}
+
+static inline QuoVar quo__mod_base64_encode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.encode() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
+  return quo__mod_base64_encode_impl(str->data, str->len, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+}
+
+static inline QuoVar quo__mod_base64_decode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.decode() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
+  return quo__mod_base64_decode_impl(str->data, str->len);
+}
+
+static inline QuoVar quo__mod_base64_encode_url(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.encode_url() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
+  return quo__mod_base64_encode_impl(str->data, str->len, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_");
+}
+
+static inline QuoVar quo__mod_base64_decode_url(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("base64.decode_url() requires a string argument");
+  QuoStr *str = quo_obj_as_str(argv[0].val_obj);
+  return quo__mod_base64_decode_impl(str->data, str->len);
+}
+
+static inline void quo__mod_base64_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "base64", NULL, NULL);
+  quo_module_register_cfn(m, "encode", -1, quo__mod_base64_encode);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_base64_decode);
+  quo_module_register_cfn(m, "encode_url", -1, quo__mod_base64_encode_url);
+  quo_module_register_cfn(m, "decode_url", -1, quo__mod_base64_decode_url);
+}
+
+// --- MODULE UUID --- //
+
+static void quo__mod_uuid_random_bytes(unsigned char *buf, int len) {
+#ifdef _WIN32
+  HCRYPTPROV prov;
+  if (CryptAcquireContext(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+    CryptGenRandom(prov, len, buf);
+    CryptReleaseContext(prov, 0);
+  } else
+    for (int i = 0; i < len; i++) buf[i] = rand() & 0xFF;
+#else
+  FILE *f = fopen("/dev/urandom", "rb");
+  if (f) {
+    fread(buf, 1, len, f);
+    fclose(f);
+  } else
+    for (int i = 0; i < len; i++) buf[i] = rand() & 0xFF;
+#endif
+}
+
+static uint64_t quo__mod_uuid_timestamp_ms(void) {
+#ifdef _WIN32
+  FILETIME ft;
+  GetSystemTimeAsFileTime(&ft);
+  uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+  return (t / 10000) - 11644473600000ULL;
+#else
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+#endif
+}
+
+static void quo__mod_uuid_format(char *buf, unsigned char *bytes) {
+  snprintf(buf, 37, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", bytes[0], bytes[1], bytes[2], bytes[3],
+           bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
+}
+
+static bool quo__mod_uuid_parse_bytes(const char *str, unsigned char *bytes) {
+  if (strlen(str) != 36) return false;
+  if (str[8] != '-' || str[13] != '-' || str[18] != '-' || str[23] != '-') return false;
+  int byte_idx = 0;
+  for (int i = 0; i < 36; i++) {
+    if (str[i] == '-') continue;
+    char hex[3] = {str[i], str[i + 1], '\0'};
+    char *end;
+    bytes[byte_idx++] = (unsigned char)strtoul(hex, &end, 16);
+    if (*end != '\0') return false;
+    i++;
+  }
+  return byte_idx == 16;
+}
+
+static int quo__mod_uuid_version(unsigned char *bytes) { return (bytes[6] >> 4) & 0x0F; }
+
+static const char *quo__mod_uuid_variant(unsigned char *bytes) {
+  int variant = (bytes[8] >> 6) & 0x03;
+  switch (variant) {
+  case 0: return "NCS";
+  case 1: return "RFC4122";
+  case 2: return "Microsoft";
+  case 3: return "Future";
+  }
+  return "Unknown";
+}
+
+static inline QuoVar quo__mod_uuid_v4(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
+  unsigned char bytes[16];
+  quo__mod_uuid_random_bytes(bytes, 16);
+  bytes[6] = (bytes[6] & 0x0F) | 0x40;
+  bytes[8] = (bytes[8] & 0x3F) | 0x80;
+  char str[37];
+  quo__mod_uuid_format(str, bytes);
+  return quo_var_new_obj(quo_str_new(str, -1));
+}
+
+static inline QuoVar quo__mod_uuid_v7(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
+  unsigned char bytes[16];
+  uint64_t timestamp = quo__mod_uuid_timestamp_ms();
+  bytes[0] = (timestamp >> 40) & 0xFF;
+  bytes[1] = (timestamp >> 32) & 0xFF;
+  bytes[2] = (timestamp >> 24) & 0xFF;
+  bytes[3] = (timestamp >> 16) & 0xFF;
+  bytes[4] = (timestamp >> 8) & 0xFF;
+  bytes[5] = timestamp & 0xFF;
+  quo__mod_uuid_random_bytes(&bytes[6], 10);
+  bytes[6] = (bytes[6] & 0x0F) | 0x70;
+  bytes[8] = (bytes[8] & 0x3F) | 0x80;
+  char str[37];
+  quo__mod_uuid_format(str, bytes);
+  return quo_var_new_obj(quo_str_new(str, -1));
+}
+
+static inline QuoVar quo__mod_uuid_parse(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("uuid.parse() requires a string argument");
+  unsigned char bytes[16];
+  if (!quo__mod_uuid_parse_bytes(quo_var_as_str(&argv[0])->data, bytes)) {
+    QuoDict *result = quo_dict_new();
+    QuoStr *key = quo_str_new("valid", -1);
+    QuoVar val = quo_var_new_bool(false);
+    quo_dict_set(result, key, &val);
+    return quo_var_new_obj(result);
+  }
+  QuoDict *result = quo_dict_new();
+  QuoStr *key_valid = quo_str_new("valid", -1);
+  QuoVar val_valid = quo_var_new_bool(true);
+  quo_dict_set(result, key_valid, &val_valid);
+  QuoStr *key_version = quo_str_new("version", -1);
+  QuoVar val_version = quo_var_new_num(quo__mod_uuid_version(bytes));
+  quo_dict_set(result, key_version, &val_version);
+  QuoStr *key_variant = quo_str_new("variant", -1);
+  QuoVar val_variant = quo_var_new_obj(quo_str_new(quo__mod_uuid_variant(bytes), -1));
+  quo_dict_set(result, key_variant, &val_variant);
+  return quo_var_new_obj(result);
+}
+
+static inline QuoVar quo__mod_uuid_is_valid(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_bool(false);
+  unsigned char bytes[16];
+  return quo_var_new_bool(quo__mod_uuid_parse_bytes(quo_var_as_str(&argv[0])->data, bytes));
+}
+
+static inline void quo__mod_uuid_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "uuid", NULL, NULL);
+  quo_module_register_cfn(m, "v4", -1, quo__mod_uuid_v4);
+  quo_module_register_cfn(m, "v7", -1, quo__mod_uuid_v7);
+  quo_module_register_cfn(m, "parse", -1, quo__mod_uuid_parse);
+  quo_module_register_cfn(m, "is_valid", -1, quo__mod_uuid_is_valid);
+}
+
+// --- MODULE ENV --- //
+
+static inline QuoVar quo__mod_env_get(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[1])) return quo_var_new_err("env.get() requires a string argument");
+  const char *value = getenv(quo_var_as_str(&argv[1])->data);
+  return value ? quo_var_new_obj(quo_str_new(value, -1)) : quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_env_set(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
+    return quo_var_new_err("env.set() requires key and value strings");
+#ifdef _WIN32
+  char *str = quo_strdupf("%s=%s", quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[1])->data);
+  _putenv(str);
+  quo_dealloc(str);
+#else
+  setenv(quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[1])->data, 1);
+#endif
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_env_unset(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("env.unset() requires a string argument");
+#ifdef _WIN32
+  char *str = quo_strdupf("%s=", quo_var_as_str(&argv[0])->data);
+  _putenv(str);
+  quo_dealloc(str);
+#else
+  unsetenv(quo_var_as_str(&argv[0])->data);
+#endif
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_env_has(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("env.has() requires a string argument");
+  return quo_var_new_bool(getenv(quo_var_as_str(&argv[0])->data) != NULL);
+}
+
+static inline QuoVar quo__mod_env_all(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
+  QuoDict *dict = quo_dict_new();
+#ifdef _WIN32
+  char *env_block = GetEnvironmentStrings();
+  if (env_block) {
+    char *p = env_block;
+    while (*p) {
+      char *eq = strchr(p, '=');
+      if (eq) {
+        *eq = '\0';
+        QuoStr *key = quo_str_new(p, -1);
+        QuoVar val = quo_var_new_obj(quo_str_new(eq + 1, -1));
+        quo_dict_set(dict, key, &val);
+        *eq = '=';
+      }
+      p += strlen(p) + 1;
+    }
+    FreeEnvironmentStrings(env_block);
+  }
+#else
+  extern char **environ;
+  for (char **env = environ; *env; env++) {
+    char *eq = strchr(*env, '=');
+    if (eq) {
+      QuoStr *key = quo_str_new(*env, eq - *env);
+      QuoVar val = quo_var_new_obj(quo_str_new(eq + 1, -1));
+      quo_dict_set(dict, key, &val);
+    }
+  }
+#endif
+  return quo_var_new_obj(dict);
+}
+
+static inline void quo__mod_env_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "env", NULL, NULL);
+  quo_module_register_cfn(m, "get", -1, quo__mod_env_get);
+  quo_module_register_cfn(m, "set", -1, quo__mod_env_set);
+  quo_module_register_cfn(m, "unset", -1, quo__mod_env_unset);
+  quo_module_register_cfn(m, "has", -1, quo__mod_env_has);
+  quo_module_register_cfn(m, "all", -1, quo__mod_env_all);
+}
+
+// --- BUILT-IN GLOBAL FUNCTIONS --- //
 
 static QuoVar quo__builtin_import(QuoModule *m, int argc, QuoVar *argv) {
   if (argc != 1 && !quo_var_is_str(&argv[0])) return quo_var_new_err("import() takes path string argument");
   QuoStr *path = quo_var_as_str(&argv[0]);
-
   if (!quo_strsuffix(path->data, ".quo")) {
-    QuoModule *exists = quo__mod_exists(path->data);
-    if (exists) return quo_var_new_obj(exists);
+    QuoVar value;
+    if (quo_ht_get(&quo__imported_modules, quo_str_new_interned(path->data, path->len), &value)) return value;
   }
-
   char *mod_path = mod_path = quo_strdupf("%s/%.*s", m->cwd, path->len, path->data);
   char *mod_source = quo_read_file(mod_path);
   if (!mod_source) {
@@ -1427,7 +1634,6 @@ static QuoVar quo__builtin_import(QuoModule *m, int argc, QuoVar *argv) {
   }
   char *mod_cwd = quo_dirname(mod_path);
   QuoModule *mod = quo_module_new(mod_cwd, mod_path, mod_source, NULL);
-
   quo_dealloc(mod_source);
   quo_dealloc(mod_cwd);
   quo_dealloc(mod_path);
@@ -1968,6 +2174,184 @@ int quo_var_print(QuoVar *v) {
   }
   }
   return 0;
+}
+
+// -------------------- LEXER -------------------- //
+
+static enum QuoTokenType quo__keywords[] = {
+    QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_WHILE, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
+    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,   QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN,
+};
+static enum QuoTokenType quo__single_char_symbols[] = {
+    QUO_TT_DOT,   QUO_TT_OPAREN, QUO_TT_CPAREN, QUO_TT_OBRACE, QUO_TT_CBRACE,   QUO_TT_OBRACKET, QUO_TT_CBRACKET,
+    QUO_TT_COMMA, QUO_TT_COLON,  QUO_TT_EQ,     QUO_TT_LT,     QUO_TT_GT,       QUO_TT_PLUS,     QUO_TT_MINUS,
+    QUO_TT_STAR,  QUO_TT_SLASH,  QUO_TT_BANG,   QUO_TT_MOD,    QUO_TT_QUESTION,
+};
+static enum QuoTokenType quo__compound_symbols[] = {
+    QUO_TT_BANGEQ, QUO_TT_DOUBLEEQ, QUO_TT_GTEQ, QUO_TT_LTEQ, QUO_TT_PLUSEQ, QUO_TT_MINUSEQ, QUO_TT_MULEQ, QUO_TT_DIVEQ,
+};
+
+static inline char quo__lexer_peek(QuoModule *m, int offset) { return m->source[m->pos + offset]; }
+static inline void quo__lexer_advance(QuoModule *m) {
+  m->pos++;
+  if (quo__lexer_peek(m, 0) == '\n') m->line++, m->column = 1;
+  else m->column++;
+}
+static QuoToken quo__lexer_next_token(QuoModule *m) {
+  QuoToken t = {.type = QUO_TT_EOF, .line = m->line, .column = m->column};
+  while (quo__lexer_peek(m, 0) != '\0') {
+    // Skip whitespace
+    if (quo__is_space(quo__lexer_peek(m, 0))) quo__lexer_advance(m);
+    // Line comments
+    else if (!strncmp(m->source + m->pos, quo_token_type_str(QUO_TT_COMMENT), strlen(quo_token_type_str(QUO_TT_COMMENT)))) {
+      while (quo__lexer_peek(m, 0) != '\n' && quo__lexer_peek(m, 0) != '\0') quo__lexer_advance(m);
+      continue;
+    }
+    // Identifier or keyword
+    else if (quo__is_alpha(quo__lexer_peek(m, 0))) {
+      t.type = QUO_TT_ID;
+      size_t start = m->pos;
+      while (quo__is_alphanumeric(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+      t.start = m->source + start;
+      t.len = m->pos - start;
+      // Find keywords
+      for (int i = 0; i < quo__static_array_size(quo__keywords); ++i) {
+        int len = (int)strlen(quo_token_type_str(quo__keywords[i]));
+        if (len == t.len && memcmp(t.start, quo_token_type_str(quo__keywords[i]), len) == 0) {
+          t.type = quo__keywords[i];
+          break;
+        }
+      }
+      break;
+    }
+    // Number
+    else if (quo__is_digit(quo__lexer_peek(m, 0))) {
+      t.type = QUO_TT_LITERAL_NUM;
+      size_t start = m->pos;
+      t.start = m->source + start;
+      // Integer part
+      while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+      // Float part
+      if (quo__lexer_peek(m, 0) == '.' && quo__lexer_peek(m, 1) != '\0' && quo__is_digit(quo__lexer_peek(m, 1))) {
+        quo__lexer_advance(m); // Skip '.'
+        while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+      }
+      t.len = m->pos - start;
+      break;
+    }
+    // String
+    else if (quo__lexer_peek(m, 0) == '"') {
+      t.type = QUO_TT_LITERAL_STR;
+      quo__lexer_advance(m); // Skip '"'
+      size_t start = m->pos;
+      t.start = m->source + start;
+      while (quo__lexer_peek(m, 0) != '\0') {
+        if (quo__lexer_peek(m, 0) == '"') {
+          if (quo__lexer_peek(m, -1) == '\\') {
+            quo__lexer_advance(m);
+            continue;
+          }
+          t.len = m->pos - start;
+          break;
+        }
+        quo__lexer_advance(m);
+      }
+      if (quo__lexer_peek(m, 0) == '"') quo__lexer_advance(m);
+      else t.type = QUO_TT_ERROR, t.error_msg = "Unterminated string";
+      break;
+    }
+    // Symbol
+    else if (!quo__is_alphanumeric(quo__lexer_peek(m, 0))) {
+      // Check for compound symbols first
+      if (quo__lexer_peek(m, 1) != '\0') {
+        char two_char[3] = {quo__lexer_peek(m, 0), quo__lexer_peek(m, 1), '\0'};
+        for (int i = 0; i < quo__static_array_size(quo__compound_symbols); ++i)
+          if (!strcmp(two_char, quo_token_type_str(quo__compound_symbols[i]))) {
+            t.type = quo__compound_symbols[i];
+            t.start = m->source + m->pos;
+            t.len = 2;
+            quo__lexer_advance(m);
+            quo__lexer_advance(m);
+            break;
+          }
+      }
+      // If not a two-char symbol, check single-char symbols
+      if (t.type == QUO_TT_EOF) { // Only if we haven't matched a compound symbol
+        char single_char[2] = {quo__lexer_peek(m, 0), '\0'};
+        for (int i = 0; i < quo__static_array_size(quo__single_char_symbols); ++i)
+          if (!strcmp(single_char, quo_token_type_str(quo__single_char_symbols[i]))) {
+            t.type = quo__single_char_symbols[i];
+            t.start = m->source + m->pos;
+            t.len = 1;
+            quo__lexer_advance(m);
+            break;
+          }
+      }
+      break;
+    }
+    // Unknown token
+    else {
+      t.type = QUO_TT_ERROR;
+      t.error_msg = "Unknown token";
+    }
+  }
+  return t;
+}
+
+bool quo_tokens_eq(QuoToken t1, QuoToken t2) { return t1.len != t2.len ? false : memcmp(t1.start, t2.start, t1.len) == 0; }
+
+const char *quo_token_type_str(enum QuoTokenType t) {
+  const char *str = NULL;
+  switch (t) {
+  case QUO_TT_NONE:
+  case QUO_TT_EOF:
+  case QUO_TT_ERROR:
+  case QUO_TT_ID:
+  case QUO_TT_LITERAL_NUM:
+  case QUO_TT_LITERAL_STR: break;
+  case QUO_TT_COMMENT: str = "#"; break;
+  case QUO_TT_VAR: str = "var"; break;
+  case QUO_TT_FN: str = "fn"; break;
+  case QUO_TT_WHILE: str = "while"; break;
+  case QUO_TT_BREAK: str = "break"; break;
+  case QUO_TT_CONTINUE: str = "continue"; break;
+  case QUO_TT_IF: str = "if"; break;
+  case QUO_TT_ELSE: str = "else"; break;
+  case QUO_TT_TRUE: str = "true"; break;
+  case QUO_TT_FALSE: str = "false"; break;
+  case QUO_TT_NIL: str = "nil"; break;
+  case QUO_TT_AND: str = "and"; break;
+  case QUO_TT_OR: str = "or"; break;
+  case QUO_TT_RETURN: str = "return"; break;
+  case QUO_TT_DOT: str = "."; break;
+  case QUO_TT_OPAREN: str = "("; break;
+  case QUO_TT_CPAREN: str = ")"; break;
+  case QUO_TT_OBRACE: str = "{"; break;
+  case QUO_TT_CBRACE: str = "}"; break;
+  case QUO_TT_OBRACKET: str = "["; break;
+  case QUO_TT_CBRACKET: str = "]"; break;
+  case QUO_TT_COMMA: str = ","; break;
+  case QUO_TT_COLON: str = ":"; break;
+  case QUO_TT_EQ: str = "="; break;
+  case QUO_TT_LT: str = "<"; break;
+  case QUO_TT_GT: str = ">"; break;
+  case QUO_TT_PLUS: str = "+"; break;
+  case QUO_TT_MINUS: str = "-"; break;
+  case QUO_TT_STAR: str = "*"; break;
+  case QUO_TT_SLASH: str = "/"; break;
+  case QUO_TT_BANG: str = "!"; break;
+  case QUO_TT_MOD: str = "%"; break;
+  case QUO_TT_QUESTION: str = "?"; break;
+  case QUO_TT_BANGEQ: str = "!="; break;
+  case QUO_TT_DIVEQ: str = "/="; break;
+  case QUO_TT_DOUBLEEQ: str = "=="; break;
+  case QUO_TT_GTEQ: str = ">="; break;
+  case QUO_TT_LTEQ: str = "<="; break;
+  case QUO_TT_MINUSEQ: str = "-="; break;
+  case QUO_TT_MULEQ: str = "*="; break;
+  case QUO_TT_PLUSEQ: str = "+="; break;
+  }
+  return str;
 }
 
 // ------------------------------ PARSER ------------------------------ //
@@ -3443,7 +3827,7 @@ void quo_vm_free(QuoVM *vm) {
 
 // -------------------- INIT / CLEANUP -------------------- //
 
-void quo_init() {
+void quo_init(const char *cwd) {
 #define REGISTER_BUILTIN_METHOD(methods_table, method_name, fn)                                                                            \
   do {                                                                                                                                     \
     QuoCFn *cfn = quo_cfunction_new(method_name, -1, fn);                                                                                  \
@@ -3456,7 +3840,6 @@ void quo_init() {
   REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "print", quo__builtin_print);
   REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "input", quo__builtin_input);
   REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "exit", quo__builtin_exit);
-
   REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "bool", quo__builtin_bool);
   REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "num", quo__builtin_num);
   REGISTER_BUILTIN_METHOD(&quo__builtin_methods, "str", quo__builtin_str);
@@ -3483,6 +3866,13 @@ void quo_init() {
   REGISTER_BUILTIN_METHOD(&quo__dict_methods, "del", quo__dict_method_del);
   REGISTER_BUILTIN_METHOD(&quo__dict_methods, "keys", quo__dict_method_keys);
   REGISTER_BUILTIN_METHOD(&quo__dict_methods, "values", quo__dict_method_values);
+
+  // Register stdlib modules
+  quo__mod_os_init(cwd);
+  quo__mod_time_init(cwd);
+  quo__mod_base64_init(cwd);
+  quo__mod_uuid_init(cwd);
+  quo__mod_env_init(cwd);
 
 #undef REGISTER_BUILTIN_METHOD
 }
