@@ -2,12 +2,7 @@
 #include "../include/quo.h"
 
 // Include modules
-#include "../include/quo-mod-csv.h"
 #include "../include/quo-mod-dl.h"
-#include "../include/quo-mod-fs.h"
-#include "../include/quo-mod-json.h"
-#include "../include/quo-mod-math.h"
-#include "../include/quo-mod-net.h"
 
 // #include "formatter.h"
 
@@ -72,15 +67,13 @@ static int quo__run(const char *path) {
   quo_dealloc(display_path);
 
   // If module is NULL, there was compilation error.
-  if (!m) return 1;
+  if (!m) {
+    quo_cleanup();
+    return 1;
+  }
 
   // Load modules
-  quo_mod_csv_init(m);
   quo_mod_dl_init(m);
-  quo_mod_fs_init(m);
-  quo_mod_json_init(m);
-  quo_mod_math_init(m);
-  quo_mod_net_init(m);
 
   int exit_code = 0;
   QuoVar result = quo_module_run(m);

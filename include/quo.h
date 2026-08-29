@@ -13,6 +13,7 @@
 #include <time.h>
 
 #ifdef _WIN32
+#include <direct.h>
 #include <wincrypt.h>
 #include <windows.h>
 #define RTLD_LAZY             0
@@ -20,9 +21,16 @@
 #define dlsym(handle, symbol) GetProcAddress((HMODULE)(handle), (symbol))
 #define dlclose(handle)       (FreeLibrary((HMODULE)(handle)) ? 0 : -1)
 #define dlerror()             "Windows error"
+#define mkdir(path, mode)     _mkdir(path)
+#define rmdir(path)           _rmdir(path)
+#define getcwd(buf, size)     _getcwd(buf, size)
+#define chdir(path)           _chdir(path)
 #else
+#include <dirent.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -1615,6 +1623,1182 @@ static inline void quo__mod_env_init(const char *cwd) {
   quo_module_register_cfn(m, "unset", -1, quo__mod_env_unset);
   quo_module_register_cfn(m, "has", -1, quo__mod_env_has);
   quo_module_register_cfn(m, "all", -1, quo__mod_env_all);
+}
+
+// --- MODULE FS --- //
+
+typedef struct {
+  QuoObj obj;
+  FILE *file;
+  QuoStr *path;
+} QuoFSFile;
+
+QUO_DEFINE_USER_TYPE(QuoFSFile, fs_file)
+
+static inline QuoVar quo__mod_fs_exists(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.exists() requires a path string");
+  FILE *f = fopen(quo_var_as_str(&argv[0])->data, "rb");
+  if (f) {
+    fclose(f);
+    return quo_var_new_bool(true);
+  }
+  // Check if it's a directory
+#ifdef _WIN32
+  DWORD attrs = GetFileAttributes(quo_var_as_str(&argv[0])->data);
+  return quo_var_new_bool(attrs != INVALID_FILE_ATTRIBUTES);
+#else
+  struct stat st;
+  return quo_var_new_bool(stat(quo_var_as_str(&argv[0])->data, &st) == 0);
+#endif
+}
+
+static inline QuoVar quo__mod_fs_stat(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.stat() requires a path string");
+#ifdef _WIN32
+  WIN32_FILE_ATTRIBUTE_DATA attrs;
+  if (!GetFileAttributesEx(quo_var_as_str(&argv[0])->data, GetFileExInfoStandard, &attrs)) {
+    QuoObj *result = quo_dict_new();
+    QuoVar key = quo_var_new_obj(quo_str_new("exists", -1));
+    QuoVar val = quo_var_new_bool(false);
+    quo_dict_set(result, quo_var_as_obj(&key), &val);
+    return quo_var_new_obj(result);
+  }
+  QuoObj *result = quo_dict_new();
+  // exists: true
+  quo_dict_set(result, quo_str_new("exists", -1), &quo_var_new_bool(true));
+  // is_dir
+  bool is_dir = (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  quo_dict_set(result, quo_str_new("is_dir", -1), &quo_var_new_bool(is_dir));
+  // is_file
+  quo_dict_set(result, quo_str_new("is_file", -1), &quo_var_new_bool(!is_dir));
+  // size
+  uint64_t size = ((uint64_t)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
+  quo_dict_set(result, quo_str_new("size", -1), &quo_var_new_int((int64_t)size));
+  // modified
+  uint64_t timestamp = ((uint64_t)attrs.ftLastWriteTime.dwHighDateTime << 32) | attrs.ftLastWriteTime.dwLowDateTime;
+  timestamp = (timestamp / 10000000) - 11644473600ULL;
+  quo_dict_set(result, quo_str_new("modified", -1), &quo_var_new_int((int64_t)timestamp));
+  return quo_var_new_obj(result);
+#else
+  struct stat st;
+  if (stat(quo_var_as_str(&argv[0])->data, &st) != 0) {
+    QuoDict *result = quo_dict_new();
+    quo_dict_set(result, quo_str_new("exists", -1), &quo_var_new_bool(false));
+    return quo_var_new_obj(result);
+  }
+  QuoDict *result = quo_dict_new();
+  quo_dict_set(result, quo_str_new("exists", -1), &quo_var_new_bool(true));
+  quo_dict_set(result, quo_str_new("is_dir", -1), &quo_var_new_bool(S_ISDIR(st.st_mode)));
+  quo_dict_set(result, quo_str_new("is_file", -1), &quo_var_new_bool(S_ISREG(st.st_mode)));
+  quo_dict_set(result, quo_str_new("size", -1), &quo_var_new_num(st.st_size));
+  quo_dict_set(result, quo_str_new("modified", -1), &quo_var_new_num(st.st_mtime));
+  return quo_var_new_obj(result);
+#endif
+}
+
+static inline QuoVar quo__mod_fs_ls(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.ls() requires a path string");
+  QuoArr *arr = quo_arr_new();
+#ifdef _WIN32
+  char *pattern = quo_strdupf("%s\\*", argv[0].val_obj->str.data);
+  WIN32_FIND_DATA fd;
+  HANDLE hFind = FindFirstFile(pattern, &fd);
+  quo_dealloc(pattern);
+  if (hFind == INVALID_HANDLE_VALUE) {
+    quo_var_unref(&quo_var_new_obj(arr));
+    return quo_var_new_err("Failed to open directory");
+  }
+  do {
+    if (strcmp(fd.cFileName, ".") != 0 && strcmp(fd.cFileName, "..") != 0)
+      quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(m, fd.cFileName, -1)));
+  } while (FindNextFile(hFind, &fd));
+  FindClose(hFind);
+#else
+  DIR *dir = opendir(quo_var_as_str(&argv[0])->data);
+  if (!dir) {
+    QuoVar o = quo_var_new_obj(arr);
+    quo_var_unref(&o);
+    return quo_var_new_err("Failed to open directory");
+  }
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != NULL)
+    if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+      quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(entry->d_name, -1)));
+  closedir(dir);
+#endif
+  return quo_var_new_obj(arr);
+}
+
+static inline QuoVar quo__mod_fs_mkdir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.mkdir_all() requires a path string");
+  char *path = quo_strdup(quo_var_as_str(&argv[0])->data);
+  char *p = path;
+#ifdef _WIN32
+  // Skip drive letter on Windows
+  if (strlen(p) >= 2 && p[1] == ':') p += 2;
+#endif
+  while (*p) {
+    if (*p == '/' || *p == '\\') {
+      char old = *p;
+      *p = '\0';
+      mkdir(path, 0755);
+      *p = old;
+    }
+    p++;
+  }
+  // Create final directory
+  mkdir(path, 0755);
+  quo_dealloc(path);
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_fs_rm(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.rm() requires a path string");
+  if (remove(quo_var_as_str(&argv[0])->data) != 0) return quo_var_new_err("Failed to remove file");
+  return quo_var_new_nil();
+}
+
+static bool quo__mod_fs_remove_recursive(const char *path) {
+#ifdef _WIN32
+  // Windows implementation using Win32 API
+  char path_buf[MAX_PATH];
+  snprintf(path_buf, sizeof(path_buf), "%s\0", path);
+  // Double null-terminate for SHFileOperation
+  size_t len = strlen(path_buf);
+  path_buf[len + 1] = '\0';
+  SHFILEOPSTRUCT shfo = {NULL, FO_DELETE, path_buf, NULL, FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT, FALSE, NULL, NULL};
+  return SHFileOperation(&shfo) == 0;
+#else
+  // Unix implementation
+  DIR *dir = opendir(path);
+  if (!dir) return false;
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != NULL) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    char *full_path = quo_strdupf("%s/%s", path, entry->d_name);
+    struct stat st;
+    if (stat(full_path, &st) == 0) {
+      if (S_ISDIR(st.st_mode)) {
+        quo__mod_fs_remove_recursive(full_path);
+      } else {
+        remove(full_path);
+      }
+    }
+    quo_dealloc(full_path);
+  }
+  closedir(dir);
+  return rmdir(path) == 0;
+#endif
+}
+
+static inline QuoVar quo__mod_fs_rmdir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.rm_all() requires a path string");
+  if (!quo__mod_fs_remove_recursive(quo_var_as_str(&argv[0])->data)) return quo_var_new_err("Failed to remove directory recursively");
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_fs_rename(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
+    return quo_var_new_err("fs.rename() requires source and destination path strings");
+  if (rename(quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[1])->data) != 0) return quo_var_new_err("Failed to rename file");
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_fs_cp(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
+    return quo_var_new_err("fs.cp() requires source and destination path strings");
+  char *src_data = quo_read_file(quo_var_as_str(&argv[0])->data);
+  if (!src_data) return quo_var_new_err("Failed to read source file");
+  bool res = quo_write_file(quo_var_as_str(&argv[1])->data, src_data);
+  if (!res) {
+    quo_dealloc(src_data);
+    return quo_var_new_err("Failed to write destination file");
+  }
+  quo_dealloc(src_data);
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_fs_cwd(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
+  char buf[4096];
+  if (!getcwd(buf, sizeof(buf))) return quo_var_new_err("Failed to get current directory");
+  return quo_var_new_obj(quo_str_new(buf, -1));
+}
+
+static inline QuoVar quo__mod_fs_cd(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("fs.chdir() requires a path string");
+  if (chdir(quo_var_as_str(&argv[0])->data) != 0) return quo_var_new_err("Failed to change directory");
+  return quo_var_new_nil();
+}
+
+static inline QuoVar quo__mod_fs_get_tmp_dir(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
+#ifdef _WIN32
+  char buf[MAX_PATH];
+  GetTempPath(MAX_PATH, buf);
+#else
+  const char *tmp = getenv("TMPDIR");
+  if (!tmp) tmp = "/tmp";
+  const char *buf = tmp;
+#endif
+  return quo_var_new_obj(quo_str_new(buf, -1));
+}
+
+// --- QuoFSFile --- //
+
+static inline QuoVar quo__mod_fs_open(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
+    return quo_var_new_err("fs.open() requires a path string and mode string");
+  QuoFSFile *file = (QuoFSFile *)quo_type_get_instance("QuoFSFile");
+  file->path = quo_var_as_str(&argv[0]);
+  file->file = fopen(file->path->data, quo_var_as_str(&argv[1])->data);
+  if (!file->file) {
+    quo_obj_unref((QuoObj *)file);
+    return quo_var_new_err("Failed to open file");
+  }
+  return quo_var_new_obj(file);
+}
+
+static inline QuoVar quo__mod_fs_file_get_path(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  return quo_var_new_obj(quo_var_as_fs_file(&argv[0])->path);
+}
+
+static inline QuoVar quo__mod_fs_file_read(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1) return quo_var_new_err("read() has no arguments");
+  QuoFSFile *file = quo_var_as_fs_file(&argv[0]);
+  char *content = quo_read_file(file->path->data);
+  if (!content) return quo_var_new_err("Failed to read file");
+  QuoStr *result = quo_str_new_raw(content, -1);
+  quo_dealloc(content);
+  return quo_var_new_obj(result);
+}
+
+static inline QuoVar quo__mod_fs_file_write(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_str(&argv[1])) return quo_var_new_err("write() requires a content string");
+  QuoFSFile *file = quo_var_as_fs_file(&argv[0]);
+  return quo_var_new_bool(quo_write_file(file->path->data, quo_var_as_str(&argv[1])->data));
+}
+
+static inline QuoVar quo__mod_fs_file_read_lines(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1) return quo_var_new_err("read_lines() has no arguments");
+  QuoFSFile *file = quo_var_as_fs_file(&argv[0]);
+  char *content = quo_read_file(file->path->data);
+  if (!content) return quo_var_new_err("Failed to read file");
+  QuoArr *arr = quo_arr_new();
+  char *line = strtok(content, "\n");
+  while (line) {
+    // Remove trailing \r if present
+    size_t len = strlen(line);
+    if (len > 0 && line[len - 1] == '\r') line[len - 1] = '\0';
+    quo_arr_push(arr, quo_var_new_obj(quo_str_new_raw(line, -1)));
+    line = strtok(NULL, "\n");
+  }
+  quo_dealloc(content);
+  return quo_var_new_obj(arr);
+}
+
+static inline void quo__mod_fs_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "fs", NULL, NULL);
+  quo_module_register_cfn(m, "open", -1, quo__mod_fs_open);
+  quo_module_register_cfn(m, "exists", -1, quo__mod_fs_exists);
+  quo_module_register_cfn(m, "stat", -1, quo__mod_fs_stat);
+  quo_module_register_cfn(m, "ls", -1, quo__mod_fs_ls);
+  quo_module_register_cfn(m, "mkdir", -1, quo__mod_fs_mkdir);
+  quo_module_register_cfn(m, "rm", -1, quo__mod_fs_rm);
+  quo_module_register_cfn(m, "rmdir", -1, quo__mod_fs_rmdir);
+  quo_module_register_cfn(m, "rename", -1, quo__mod_fs_rename);
+  quo_module_register_cfn(m, "cp", -1, quo__mod_fs_cp);
+  quo_module_register_cfn(m, "cwd", -1, quo__mod_fs_cwd);
+  quo_module_register_cfn(m, "cd", -1, quo__mod_fs_cd);
+  quo_module_register_cfn(m, "get_tmp_dir", -1, quo__mod_fs_get_tmp_dir);
+
+  QuoObj *fs_file_type = quo_type_register("QuoFSFile", sizeof(QuoFSFile));
+  quo_type_add_cfn(fs_file_type, "get_path", -1, quo__mod_fs_file_get_path);
+  quo_type_add_cfn(fs_file_type, "read", -1, quo__mod_fs_file_read);
+  quo_type_add_cfn(fs_file_type, "write", -1, quo__mod_fs_file_write);
+  quo_type_add_cfn(fs_file_type, "read_lines", -1, quo__mod_fs_file_read_lines);
+}
+
+// --- MODULE JSON --- //
+
+typedef struct {
+  const char *json;
+  int pos, len;
+  QuoModule *m;
+} quo__json_parser;
+
+static QuoVar quo__json_parse_value(quo__json_parser *p);
+
+static void quo__json_skip_whitespace(quo__json_parser *p) {
+  while (p->pos < p->len && (p->json[p->pos] == ' ' || p->json[p->pos] == '\t' || p->json[p->pos] == '\n' || p->json[p->pos] == '\r'))
+    p->pos++;
+}
+static char quo__json_peek(quo__json_parser *p) { return p->pos < p->len ? p->json[p->pos] : '\0'; }
+static char quo__json_next(quo__json_parser *p) { return p->pos < p->len ? p->json[p->pos++] : '\0'; }
+
+// Parse string
+static QuoVar quo__json_parse_string(quo__json_parser *p) {
+  if (quo__json_next(p) != '"') return quo_var_new_err("Expected '\"'");
+
+  QuoStringBuilder sb = quo_sb_new();
+
+  while (p->pos < p->len && quo__json_peek(p) != '"') {
+    char c = quo__json_next(p);
+    if (c == '\\') {
+      c = quo__json_next(p);
+      switch (c) {
+      case '"': da_add(&sb, '"'); break;
+      case '\\': da_add(&sb, '\\'); break;
+      case '/': da_add(&sb, '/'); break;
+      case 'b': da_add(&sb, '\b'); break;
+      case 'f': da_add(&sb, '\f'); break;
+      case 'n': da_add(&sb, '\n'); break;
+      case 'r': da_add(&sb, '\r'); break;
+      case 't': da_add(&sb, '\t'); break;
+      case 'u': {
+        // Parse \uXXXX
+        char hex[5] = {0};
+        for (int i = 0; i < 4 && p->pos < p->len; i++) hex[i] = quo__json_next(p);
+        unsigned int codepoint = (unsigned int)strtol(hex, NULL, 16);
+        if (codepoint < 0x80) {
+          da_add(&sb, (char)codepoint);
+        } else if (codepoint < 0x800) {
+          da_add(&sb, (char)(0xC0 | (codepoint >> 6)));
+          da_add(&sb, (char)(0x80 | (codepoint & 0x3F)));
+        } else {
+          da_add(&sb, (char)(0xE0 | (codepoint >> 12)));
+          da_add(&sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+          da_add(&sb, (char)(0x80 | (codepoint & 0x3F)));
+        }
+        break;
+      }
+      default: da_add(&sb, c); break;
+      }
+    } else {
+      da_add(&sb, c);
+    }
+  }
+  if (quo__json_next(p) != '"') {
+    quo_sb_free(&sb);
+    return quo_var_new_err("Unterminated string");
+  }
+  quo_sb_null_terminate(&sb);
+  QuoStr *str = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
+  quo_sb_free(&sb);
+  return quo_var_new_obj(str);
+}
+
+// Parse number
+static QuoVar quo__json_parse_number(quo__json_parser *p) {
+  int start = p->pos;
+  if (quo__json_peek(p) == '-') p->pos++;
+  while (p->pos < p->len && quo__json_peek(p) >= '0' && quo__json_peek(p) <= '9') p->pos++;
+  if (p->pos < p->len && quo__json_peek(p) == '.') {
+    p->pos++;
+    while (p->pos < p->len && quo__json_peek(p) >= '0' && quo__json_peek(p) <= '9') p->pos++;
+  }
+  if (p->pos < p->len && (quo__json_peek(p) == 'e' || quo__json_peek(p) == 'E')) {
+    p->pos++;
+    if (quo__json_peek(p) == '+' || quo__json_peek(p) == '-') p->pos++;
+    while (p->pos < p->len && quo__json_peek(p) >= '0' && quo__json_peek(p) <= '9') p->pos++;
+  }
+  int len = p->pos - start;
+  QuoVar result = quo_var_new_num(quo_strtod(p->json + start, len));
+  return result;
+}
+
+// Parse array
+static QuoVar quo__json_parse_array(quo__json_parser *p) {
+  quo__json_next(p); // Skip '['
+  QuoArr *arr = quo_arr_new();
+  quo__json_skip_whitespace(p);
+  if (quo__json_peek(p) == ']') {
+    quo__json_next(p);
+    return quo_var_new_obj(arr);
+  }
+  while (true) {
+    quo__json_skip_whitespace(p);
+    QuoVar value = quo__json_parse_value(p);
+    if (quo_var_is_err(&value)) {
+      QuoVar obj = quo_var_new_obj(arr);
+      quo_var_unref(&obj);
+      return value;
+    }
+    quo_arr_push(arr, value);
+    quo__json_skip_whitespace(p);
+    if (quo__json_peek(p) == ']') {
+      quo__json_next(p);
+      break;
+    }
+    if (quo__json_peek(p) != ',') {
+      QuoVar obj = quo_var_new_obj(arr);
+      quo_var_unref(&obj);
+      return quo_var_new_err("Expected ',' or ']'");
+    }
+    quo__json_next(p);
+  }
+  return quo_var_new_obj(arr);
+}
+
+// Parse object
+static QuoVar quo__json_parse_object(quo__json_parser *p) {
+  quo__json_next(p); // Skip '{'
+  QuoDict *dict = quo_dict_new();
+  quo__json_skip_whitespace(p);
+  if (quo__json_peek(p) == '}') {
+    quo__json_next(p);
+    return quo_var_new_obj(dict);
+  }
+  while (true) {
+    quo__json_skip_whitespace(p);
+    QuoVar key = quo__json_parse_string(p);
+    if (quo_var_is_err(&key)) {
+      QuoVar obj = quo_var_new_obj(dict);
+      quo_var_unref(&obj);
+      return key;
+    }
+    quo__json_skip_whitespace(p);
+    if (quo__json_next(p) != ':') {
+      QuoVar obj = quo_var_new_obj(dict);
+      quo_var_unref(&obj);
+      return quo_var_new_err("Expected ':'");
+    }
+    quo__json_skip_whitespace(p);
+    QuoVar value = quo__json_parse_value(p);
+    if (quo_var_is_err(&value)) {
+      QuoVar obj = quo_var_new_obj(dict);
+      quo_var_unref(&obj);
+      return value;
+    }
+    quo_dict_set(dict, quo_var_as_str(&key), &value);
+    quo__json_skip_whitespace(p);
+    if (quo__json_peek(p) == '}') {
+      quo__json_next(p);
+      break;
+    }
+    if (quo__json_peek(p) != ',') {
+      QuoVar obj = quo_var_new_obj(dict);
+      quo_var_unref(&obj);
+      return quo_var_new_err("Expected ',' or '}'");
+    }
+    quo__json_next(p);
+  }
+  return quo_var_new_obj(dict);
+}
+
+// Parse value
+static QuoVar quo__json_parse_value(quo__json_parser *p) {
+  quo__json_skip_whitespace(p);
+  char c = quo__json_peek(p);
+  if (c == '"') return quo__json_parse_string(p);
+  if (c == '{') return quo__json_parse_object(p);
+  if (c == '[') return quo__json_parse_array(p);
+  if (c == 't' || c == 'f') {
+    if (strncmp(p->json + p->pos, "true", 4) == 0) {
+      p->pos += 4;
+      return quo_var_new_bool(true);
+    }
+    if (strncmp(p->json + p->pos, "false", 5) == 0) {
+      p->pos += 5;
+      return quo_var_new_bool(false);
+    }
+    return quo_var_new_err("Invalid value");
+  }
+  if (c == 'n') {
+    if (strncmp(p->json + p->pos, "null", 4) == 0) {
+      p->pos += 4;
+      return quo_var_new_nil();
+    }
+    return quo_var_new_err("Invalid value");
+  }
+  if (c == '-' || (c >= '0' && c <= '9')) return quo__json_parse_number(p);
+  return quo_var_new_err("Unexpected character");
+}
+
+static void quo__json_stringify_string(QuoStringBuilder *sb, const char *str) {
+  da_add(sb, '"');
+  for (const char *c = str; *c; c++) {
+    switch (*c) {
+    case '"': quo_sb_append_cstr(sb, "\\\""); break;
+    case '\\': quo_sb_append_cstr(sb, "\\\\"); break;
+    case '\b': quo_sb_append_cstr(sb, "\\b"); break;
+    case '\f': quo_sb_append_cstr(sb, "\\f"); break;
+    case '\n': quo_sb_append_cstr(sb, "\\n"); break;
+    case '\r': quo_sb_append_cstr(sb, "\\r"); break;
+    case '\t': quo_sb_append_cstr(sb, "\\t"); break;
+    default:
+      if ((unsigned char)*c < 0x20) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)*c);
+        quo_sb_append_cstr(sb, buf);
+      } else {
+        da_add(sb, *c);
+      }
+    }
+  }
+  da_add(sb, '"');
+}
+
+static void quo__json_stringify_value(QuoStringBuilder *sb, QuoVar *v) {
+  switch (v->type) {
+  case QUO_VAR_TYPE_NIL: quo_sb_append_cstr(sb, "null"); break;
+  case QUO_VAR_TYPE_BOOL: quo_sb_append_cstr(sb, v->val_num ? "true" : "false"); break;
+  case QUO_VAR_TYPE_NUM: {
+    char buf[318];
+    snprintf(buf, sizeof(buf), "%g", v->val_num);
+    quo_sb_append_cstr(sb, buf);
+    break;
+  }
+  case QUO_VAR_TYPE_OBJ: {
+    switch (v->val_obj->type) {
+    case QUO_OBJ_TYPE_STR: quo__json_stringify_string(sb, quo_var_as_str(v)->data); break;
+    case QUO_OBJ_TYPE_ARR: {
+      da_add(sb, '[');
+      QuoArr *arr = quo_var_as_arr(v);
+      for (int i = 0; i < quo_arr_len(arr); i++) {
+        if (i > 0) da_add(sb, ',');
+        QuoVar val = quo_arr_get(arr, i);
+        quo__json_stringify_value(sb, &val);
+      }
+      da_add(sb, ']');
+      break;
+    }
+    case QUO_OBJ_TYPE_DICT: {
+      da_add(sb, '{');
+      bool first = true;
+      for (int i = 0; i < quo_var_as_dict(v)->dict.capacity; i++) {
+        QuoHashTableEntry *entry = &quo_var_as_dict(v)->dict.items[i];
+        if (entry->key) {
+          if (!first) da_add(sb, ',');
+          quo__json_stringify_string(sb, entry->key->data);
+          da_add(sb, ':');
+          quo__json_stringify_value(sb, &entry->value);
+          first = false;
+        }
+      }
+      da_add(sb, '}');
+      break;
+    }
+    default: quo_sb_append_cstr(sb, "null");
+    }
+    break;
+  }
+  default: quo_sb_append_cstr(sb, "null");
+  }
+}
+
+static inline QuoVar quo__mod_json_decode(QuoModule *m, int argc, QuoVar *argv) {
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("json.decode() requires a string argument");
+  quo__json_parser parser;
+  parser.m = m;
+  parser.json = quo_var_as_str(&argv[0])->data;
+  parser.len = quo_var_as_str(&argv[0])->len;
+  parser.pos = 0;
+  QuoVar result = quo__json_parse_value(&parser);
+  return result;
+}
+
+static inline QuoVar quo__mod_json_encode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1) return quo_var_new_err("json.encode() requires one argument");
+  QuoStringBuilder sb = quo_sb_new();
+  quo__json_stringify_value(&sb, &argv[0]);
+  quo_sb_null_terminate(&sb);
+  QuoStr *result = quo_str_new(quo_sb_string(&sb), da_count(&sb) - 1);
+  quo_sb_free(&sb);
+  return quo_var_new_obj(result);
+}
+
+static inline void quo__mod_json_init(const char *cwd) {
+  QuoModule *m = quo_module_new(cwd, "json", NULL, NULL);
+  quo_module_register_cfn(m, "encode", -1, quo__mod_json_encode);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_json_decode);
+}
+
+// --- MODULE NET --- //
+
+enum {
+  CURLOPT_URL = 10002,
+  CURLOPT_CUSTOMREQUEST = 10036,
+  CURLOPT_POSTFIELDS = 10015,
+  CURLOPT_WRITEFUNCTION = 20011,
+  CURLOPT_WRITEDATA = 10001,
+  CURLOPT_HTTPHEADER = 10023,
+  CURLOPT_FOLLOWLOCATION = 52,
+  CURLE_OK = 0,
+  CURL_GLOBAL_ALL = 3,
+};
+
+typedef void *(*curl_easy_init_t)(void);
+typedef void (*curl_easy_cleanup_t)(void *);
+typedef void *(*curl_easy_setopt_t)(void *, int, ...);
+typedef int (*curl_easy_perform_t)(void *);
+typedef char *(*curl_easy_escape_t)(void *, const char *, int);
+typedef char *(*curl_easy_unescape_t)(void *, const char *, int, int *);
+typedef const char *(*curl_easy_strerror_t)(int);
+typedef void *(*curl_slist_append_t)(void *, const char *);
+typedef void (*curl_slist_free_all_t)(void *);
+typedef int (*curl_global_init_t)(long);
+typedef size_t (*curl_write_callback_t)(char *, size_t, size_t, void *);
+typedef int CURLoption;
+typedef int CURLcode;
+
+// Static function pointers
+static struct {
+  void *handle;
+  curl_easy_init_t easy_init;
+  curl_easy_cleanup_t easy_cleanup;
+  curl_easy_setopt_t easy_setopt;
+  curl_easy_perform_t easy_perform;
+  curl_easy_escape_t easy_escape;
+  curl_easy_unescape_t easy_unescape;
+  curl_easy_strerror_t easy_strerror;
+  curl_slist_append_t slist_append;
+  curl_slist_free_all_t slist_free_all;
+  curl_global_init_t global_init;
+} quo__curl = {0};
+
+// ---------- PRIVATE HELPERS ---------- //
+
+// Callback for writing response data
+static size_t quo__mod_net_write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+  QuoStringBuilder *sb = (QuoStringBuilder *)userp;
+  const char *content = (const char *)contents;
+  size_t total_size = size * nmemb;
+  quo_sb_append(sb, content, total_size);
+  return total_size;
+}
+
+// Helper to perform HTTP request
+static QuoVar quo__mod_net_perform_request(const char *url, const char *method, const char *data, QuoDict *headers_dict) {
+  if (!quo__curl.handle) return quo_var_new_err("libcurl not loaded");
+  void *curl = quo__curl.easy_init();
+  if (!curl) return quo_var_new_err("Failed to initialize curl");
+  // Response buffer
+  QuoStringBuilder response = quo_sb_new();
+  // Set URL
+  quo__curl.easy_setopt(curl, CURLOPT_URL, url);
+  // Set method
+  if (method) quo__curl.easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+  // Set POST data (Request body)
+  if (data) quo__curl.easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+  // Set write callback
+  quo__curl.easy_setopt(curl, CURLOPT_WRITEFUNCTION, (curl_write_callback_t)quo__mod_net_write_callback);
+  quo__curl.easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  // Set headers
+  void *header_list = NULL;
+  if (headers_dict) {
+    for (int i = 0; i < headers_dict->dict.capacity; i++) {
+      QuoHashTableEntry *entry = &headers_dict->dict.items[i];
+      if (entry->key) {
+        char *header = quo_strdupf("%s: %s", entry->key->data, quo_var_is_str(&entry->value) ? quo_var_as_str(&entry->value)->data : "");
+        header_list = quo__curl.slist_append(header_list, header);
+        quo_dealloc(header);
+      }
+    }
+    if (header_list) quo__curl.easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+  }
+  // Follow redirects
+  quo__curl.easy_setopt(curl, CURLOPT_FOLLOWLOCATION, (long)1);
+  // Perform request
+  CURLcode res = quo__curl.easy_perform(curl);
+  // Cleanup
+  if (header_list) quo__curl.slist_free_all(header_list);
+  quo__curl.easy_cleanup(curl);
+  if (res != CURLE_OK) {
+    quo_sb_free(&response);
+    const char *error = quo__curl.easy_strerror(res);
+    return quo_var_new_err(error ? error : "Unknown curl error");
+  }
+  quo_sb_null_terminate(&response);
+  QuoStr *result = quo_str_new_raw(quo_sb_string(&response), response.count);
+  quo_sb_free(&response);
+  return quo_var_new_obj(result);
+}
+
+static inline QuoVar quo__mod_net_get(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.get() requires a URL string");
+  return quo__mod_net_perform_request(quo_var_as_str(&argv[0])->data, "GET", NULL, NULL);
+}
+
+static inline QuoVar quo__mod_net_post(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.post() requires a URL string");
+  const char *data = NULL;
+  if (argc >= 2 && quo_var_is_str(&argv[1])) data = quo_var_as_str(&argv[1])->data;
+  return quo__mod_net_perform_request(quo_var_as_str(&argv[0])->data, "POST", data, NULL);
+}
+
+static inline QuoVar quo__mod_net_put(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.put() requires a URL string");
+  const char *data = NULL;
+  if (argc >= 2 && quo_var_is_str(&argv[1])) data = quo_var_as_str(&argv[1])->data;
+  return quo__mod_net_perform_request(quo_var_as_str(&argv[0])->data, "PUT", data, NULL);
+}
+
+static inline QuoVar quo__mod_net_patch(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.patch() requires a URL string");
+  const char *data = NULL;
+  if (argc >= 2 && quo_var_is_str(&argv[1])) data = quo_var_as_str(&argv[1])->data;
+  return quo__mod_net_perform_request(quo_var_as_str(&argv[0])->data, "PATCH", data, NULL);
+}
+
+static inline QuoVar quo__mod_net_delete(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc < 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.delete() requires a URL string");
+  return quo__mod_net_perform_request(quo_var_as_str(&argv[0])->data, "DELETE", NULL, NULL);
+}
+
+static inline QuoVar quo__mod_net_request(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc < 2 || !quo_var_is_str(&argv[0]) || !quo_var_is_str(&argv[1]))
+    return quo_var_new_err("net.request() requires URL and method strings");
+  const char *url = quo_var_as_str(&argv[0])->data;
+  const char *method = quo_var_as_str(&argv[1])->data;
+  // Optional body
+  const char *data = NULL;
+  if (argc >= 3 && quo_var_is_str(&argv[2])) data = quo_var_as_str(&argv[2])->data;
+  // Optional headers
+  QuoDict *headers = NULL;
+  if (argc >= 4 && quo_var_is_dict(&argv[3])) headers = quo_var_as_dict(&argv[3]);
+  return quo__mod_net_perform_request(url, method, data, headers);
+}
+
+static inline QuoVar quo__mod_net_encode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.url_encode() requires a string argument");
+  if (!quo__curl.handle) return quo_var_new_err("libcurl not loaded");
+  void *curl = quo__curl.easy_init();
+  if (!curl) return quo_var_new_err("Failed to initialize curl");
+  char *encoded = quo__curl.easy_escape(curl, quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[0])->len);
+  quo__curl.easy_cleanup(curl);
+  if (!encoded) return quo_var_new_err("URL encoding failed");
+  QuoStr *result = quo_str_new(encoded, -1);
+  free(encoded); // curl_easy_escape returns malloc'd memory
+  return quo_var_new_obj(result);
+}
+
+static inline QuoVar quo__mod_net_decode(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_str(&argv[0])) return quo_var_new_err("net.url_decode() requires a string argument");
+  if (!quo__curl.handle) return quo_var_new_err("libcurl not loaded");
+  void *curl = quo__curl.easy_init();
+  if (!curl) return quo_var_new_err("Failed to initialize curl");
+  int out_len;
+  char *decoded = quo__curl.easy_unescape(curl, quo_var_as_str(&argv[0])->data, quo_var_as_str(&argv[0])->len, &out_len);
+  quo__curl.easy_cleanup(curl);
+  if (!decoded) return quo_var_new_err("URL decoding failed");
+  QuoStr *result = quo_str_new(decoded, out_len);
+  free(decoded); // curl_easy_unescape returns malloc'd memory
+  return quo_var_new_obj(result);
+}
+
+// Cleanup - unload libcurl
+static inline void quo__mod_net_cleanup(QuoModule *m) {
+  QUO_UNUSED(m);
+  if (quo__curl.handle) {
+    dlclose(quo__curl.handle);
+    quo__curl.handle = NULL;
+  }
+}
+
+// Register the net namespace. Returns false if libcurl is not available.
+static inline void quo__mod_net_init(const char *cwd) {
+  if (quo__curl.handle) return; // Already loaded
+
+  // Try different library names based on platform
+#ifdef _WIN32
+  const char *lib_names[] = {"libcurl.dll", "libcurl-4.dll"};
+#elif defined(__APPLE__)
+  const char *lib_names[] = {"libcurl.dylib", "libcurl.4.dylib"};
+#else
+  const char *lib_names[] = {"libcurl.so", "libcurl.so.4", "libcurl.so.4.8.0"};
+#endif
+
+  for (size_t i = 0; i < sizeof(lib_names) / sizeof(lib_names[0]); i++) {
+    quo__curl.handle = dlopen(lib_names[i], RTLD_LAZY);
+    if (quo__curl.handle) break;
+  }
+  if (!quo__curl.handle) return;
+
+  // Load function pointers
+  quo__curl.easy_init = (curl_easy_init_t)dlsym(quo__curl.handle, "curl_easy_init");
+  quo__curl.easy_cleanup = (curl_easy_cleanup_t)dlsym(quo__curl.handle, "curl_easy_cleanup");
+  quo__curl.easy_setopt = (curl_easy_setopt_t)dlsym(quo__curl.handle, "curl_easy_setopt");
+  quo__curl.easy_perform = (curl_easy_perform_t)dlsym(quo__curl.handle, "curl_easy_perform");
+  quo__curl.easy_escape = (curl_easy_escape_t)dlsym(quo__curl.handle, "curl_easy_escape");
+  quo__curl.easy_unescape = (curl_easy_unescape_t)dlsym(quo__curl.handle, "curl_easy_unescape");
+  quo__curl.easy_strerror = (curl_easy_strerror_t)dlsym(quo__curl.handle, "curl_easy_strerror");
+  quo__curl.slist_append = (curl_slist_append_t)dlsym(quo__curl.handle, "curl_slist_append");
+  quo__curl.slist_free_all = (curl_slist_free_all_t)dlsym(quo__curl.handle, "curl_slist_free_all");
+  quo__curl.global_init = (curl_global_init_t)dlsym(quo__curl.handle, "curl_global_init");
+
+  // Check all functions loaded
+  if (!quo__curl.easy_init || !quo__curl.easy_cleanup || !quo__curl.easy_setopt || !quo__curl.easy_perform || !quo__curl.easy_escape ||
+      !quo__curl.easy_unescape || !quo__curl.easy_strerror || !quo__curl.slist_append || !quo__curl.slist_free_all ||
+      !quo__curl.global_init) {
+    dlclose(quo__curl.handle);
+    quo__curl.handle = NULL;
+    return;
+  }
+  // Initialize curl globally
+  quo__curl.global_init(CURL_GLOBAL_ALL);
+
+  QuoModule *m = quo_module_new(cwd, "net", NULL, quo__mod_net_cleanup);
+  quo_module_register_cfn(m, "get", -1, quo__mod_net_get);
+  quo_module_register_cfn(m, "post", -1, quo__mod_net_post);
+  quo_module_register_cfn(m, "put", -1, quo__mod_net_put);
+  quo_module_register_cfn(m, "patch", -1, quo__mod_net_patch);
+  quo_module_register_cfn(m, "delete", -1, quo__mod_net_delete);
+  quo_module_register_cfn(m, "encode", -1, quo__mod_net_encode);
+  quo_module_register_cfn(m, "decode", -1, quo__mod_net_decode);
+}
+
+// --- MODULE MATH --- //
+
+typedef double (*math_func_t)(double);
+typedef double (*math_func2_t)(double, double);
+
+static struct {
+  void *handle;
+  math_func_t floor;
+  math_func_t ceil;
+  math_func_t round;
+  math_func_t trunc;
+  math_func_t fabs;
+  math_func_t sqrt;
+  math_func_t cbrt;
+  math_func2_t pow;
+  math_func_t exp;
+  math_func_t log;
+  math_func_t log2;
+  math_func_t log10;
+  math_func_t sin;
+  math_func_t cos;
+  math_func_t tan;
+  math_func_t asin;
+  math_func_t acos;
+  math_func_t atan;
+  math_func2_t atan2;
+  math_func_t sinh;
+  math_func_t cosh;
+  math_func_t tanh;
+} quo__math = {0};
+
+// ---------- PRIVATE API ---------- //
+
+static QuoVar quo__mod_math_floor(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("floor() requires a number");
+  return quo_var_new_num((int64_t)quo__math.floor(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_ceil(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("ceil() requires a number");
+  return quo_var_new_num((int64_t)quo__math.ceil(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_round(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("round() requires a number");
+  return quo_var_new_num((int64_t)quo__math.round(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_trunc(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("trunc() requires a number");
+  return quo_var_new_num((int64_t)quo__math.trunc(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_abs(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("abs() requires a number");
+  if (quo_var_is_num(&argv[0])) return quo_var_new_num(llabs((int64_t)argv[0].val_num));
+  return quo_var_new_num(quo__math.fabs(argv[0].val_num));
+}
+
+static QuoVar quo__mod_math_sqrt(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("sqrt() requires a number");
+  return quo_var_new_num(quo__math.sqrt(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_cbrt(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("cbrt() requires a number");
+  return quo_var_new_num(quo__math.cbrt(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_pow(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("pow() requires two numbers");
+  return quo_var_new_num(quo__math.pow(quo_var_as_num(&argv[0]), quo_var_as_num(&argv[1])));
+}
+
+static QuoVar quo__mod_math_exp(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("exp() requires a number");
+  return quo_var_new_num(quo__math.exp(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_log(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("log() requires a number");
+  double val = quo_var_as_num(&argv[0]);
+  if (val <= 0) return quo_var_new_err("log() argument must be positive");
+  return quo_var_new_num(quo__math.log(val));
+}
+
+static QuoVar quo__mod_math_log2(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("log2() requires a number");
+  double val = quo_var_as_num(&argv[0]);
+  if (val <= 0) return quo_var_new_err("log2() argument must be positive");
+  return quo_var_new_num(quo__math.log2(val));
+}
+
+static QuoVar quo__mod_math_log10(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("log10() requires a number");
+  double val = quo_var_as_num(&argv[0]);
+  if (val <= 0) return quo_var_new_err("log10() argument must be positive");
+  return quo_var_new_num(quo__math.log10(val));
+}
+
+static QuoVar quo__mod_math_sin(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("sin() requires a number");
+  return quo_var_new_num(quo__math.sin(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_cos(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("cos() requires a number");
+  return quo_var_new_num(quo__math.cos(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_tan(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("tan() requires a number");
+  return quo_var_new_num(quo__math.tan(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_asin(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("asin() requires a number");
+  double val = quo_var_as_num(&argv[0]);
+  if (val < -1 || val > 1) return quo_var_new_err("asin() argument must be between -1 and 1");
+  return quo_var_new_num(quo__math.asin(val));
+}
+
+static QuoVar quo__mod_math_acos(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("acos() requires a number");
+  double val = quo_var_as_num(&argv[0]);
+  if (val < -1 || val > 1) return quo_var_new_err("acos() argument must be between -1 and 1");
+  return quo_var_new_num(quo__math.acos(val));
+}
+
+static QuoVar quo__mod_math_atan(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("atan() requires a number");
+  return quo_var_new_num(quo__math.atan(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_atan2(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("atan2() requires two numbers");
+  return quo_var_new_num(quo__math.atan2(quo_var_as_num(&argv[0]), quo_var_as_num(&argv[1])));
+}
+
+static QuoVar quo__mod_math_sinh(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("sinh() requires a number");
+  return quo_var_new_num(quo__math.sinh(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_cosh(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("cosh() requires a number");
+  return quo_var_new_num(quo__math.cosh(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_tanh(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("tanh() requires a number");
+  return quo_var_new_num(quo__math.tanh(quo_var_as_num(&argv[0])));
+}
+
+static QuoVar quo__mod_math_min(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("min() requires two numbers");
+  if (quo_var_is_num(&argv[0]) && quo_var_is_num(&argv[1]))
+    return quo_var_new_num(argv[0].val_num < argv[1].val_num ? argv[0].val_num : argv[1].val_num);
+  double a = quo_var_as_num(&argv[0]), b = quo_var_as_num(&argv[1]);
+  return quo_var_new_num(a < b ? a : b);
+}
+
+static QuoVar quo__mod_math_max(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 2 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1])) return quo_var_new_err("max() requires two numbers");
+  if (quo_var_is_num(&argv[0]) && quo_var_is_num(&argv[1]))
+    return quo_var_new_num(argv[0].val_num > argv[1].val_num ? argv[0].val_num : argv[1].val_num);
+  double a = quo_var_as_num(&argv[0]), b = quo_var_as_num(&argv[1]);
+  return quo_var_new_num(a > b ? a : b);
+}
+
+static QuoVar quo__mod_math_clamp(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 3 || !quo_var_is_num(&argv[0]) || !quo_var_is_num(&argv[1]) || !quo_var_is_num(&argv[2]))
+    return quo_var_new_err("clamp() requires three numbers");
+  double val = quo_var_as_num(&argv[0]);
+  double min = quo_var_as_num(&argv[1]);
+  double max = quo_var_as_num(&argv[2]);
+  if (val < min) val = min;
+  if (val > max) val = max;
+  return quo_var_new_num(val);
+}
+
+static QuoVar quo__mod_math_random_float(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  QUO_UNUSED(argc);
+  QUO_UNUSED(argv);
+  return quo_var_new_num((double)rand() / RAND_MAX);
+}
+
+static QuoVar quo__mod_math_random(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("random() requires an integer max");
+  return quo_var_new_num(rand() % (int64_t)argv[0].val_num);
+}
+
+static QuoVar quo__mod_math_deg_to_rad(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("deg_to_rad() requires a number");
+  return quo_var_new_num(quo_var_as_num(&argv[0]) * 3.1415926535897932384 / 180.0);
+}
+
+static QuoVar quo__mod_math_rad_to_deg(QuoModule *m, int argc, QuoVar *argv) {
+  QUO_UNUSED(m);
+  if (argc != 1 || !quo_var_is_num(&argv[0])) return quo_var_new_err("rad_to_deg() requires a number");
+  return quo_var_new_num(quo_var_as_num(&argv[0]) * 180.0 / 3.1415926535897932384);
+}
+
+static inline void quo__mod_math_cleanup(QuoModule *m) {
+  QUO_UNUSED(m);
+  if (quo__math.handle) {
+    dlclose(quo__math.handle);
+    quo__math.handle = NULL;
+  }
+}
+
+static inline void quo__mod_math_init(const char *cwd) {
+  if (quo__math.handle) return;
+
+#ifdef _WIN32
+  // On Windows, math functions are in msvcrt.dll or ucrtbase.dll
+  const char *lib_names[] = {"msvcrt.dll", "ucrtbase.dll"};
+#elif defined(__APPLE__)
+  // On macOS, math functions are in libSystem.dylib
+  const char *lib_names[] = {"libSystem.dylib", "libm.dylib"};
+#else
+  // On Linux/BSD, math functions are in libm.so
+  const char *lib_names[] = {"libm.so", "libm.so.6"};
+#endif
+
+  for (size_t i = 0; i < sizeof(lib_names) / sizeof(lib_names[0]); i++) {
+    quo__math.handle = dlopen(lib_names[i], RTLD_LAZY);
+    if (quo__math.handle) break;
+  }
+  if (!quo__math.handle) return;
+
+  // Load all math functions
+  quo__math.floor = (math_func_t)dlsym(quo__math.handle, "floor");
+  quo__math.ceil = (math_func_t)dlsym(quo__math.handle, "ceil");
+  quo__math.round = (math_func_t)dlsym(quo__math.handle, "round");
+  quo__math.trunc = (math_func_t)dlsym(quo__math.handle, "trunc");
+  quo__math.fabs = (math_func_t)dlsym(quo__math.handle, "fabs");
+  quo__math.sqrt = (math_func_t)dlsym(quo__math.handle, "sqrt");
+  quo__math.cbrt = (math_func_t)dlsym(quo__math.handle, "cbrt");
+  quo__math.pow = (math_func2_t)dlsym(quo__math.handle, "pow");
+  quo__math.exp = (math_func_t)dlsym(quo__math.handle, "exp");
+  quo__math.log = (math_func_t)dlsym(quo__math.handle, "log");
+  quo__math.log2 = (math_func_t)dlsym(quo__math.handle, "log2");
+  quo__math.log10 = (math_func_t)dlsym(quo__math.handle, "log10");
+  quo__math.sin = (math_func_t)dlsym(quo__math.handle, "sin");
+  quo__math.cos = (math_func_t)dlsym(quo__math.handle, "cos");
+  quo__math.tan = (math_func_t)dlsym(quo__math.handle, "tan");
+  quo__math.asin = (math_func_t)dlsym(quo__math.handle, "asin");
+  quo__math.acos = (math_func_t)dlsym(quo__math.handle, "acos");
+  quo__math.atan = (math_func_t)dlsym(quo__math.handle, "atan");
+  quo__math.atan2 = (math_func2_t)dlsym(quo__math.handle, "atan2");
+  quo__math.sinh = (math_func_t)dlsym(quo__math.handle, "sinh");
+  quo__math.cosh = (math_func_t)dlsym(quo__math.handle, "cosh");
+  quo__math.tanh = (math_func_t)dlsym(quo__math.handle, "tanh");
+
+  if (!quo__math.floor || !quo__math.sqrt || !quo__math.sin) {
+    dlclose(quo__math.handle);
+    quo__math.handle = NULL;
+    return;
+  }
+
+  QuoModule *m = quo_module_new(cwd, "math", NULL, quo__mod_math_cleanup);
+  quo_module_register_cfn(m, "floor", -1, quo__mod_math_floor);
+  quo_module_register_cfn(m, "ceil", -1, quo__mod_math_ceil);
+  quo_module_register_cfn(m, "round", -1, quo__mod_math_round);
+  quo_module_register_cfn(m, "trunc", -1, quo__mod_math_trunc);
+  quo_module_register_cfn(m, "abs", -1, quo__mod_math_abs);
+  quo_module_register_cfn(m, "sqrt", -1, quo__mod_math_sqrt);
+  quo_module_register_cfn(m, "cbrt", -1, quo__mod_math_cbrt);
+  quo_module_register_cfn(m, "pow", -1, quo__mod_math_pow);
+  quo_module_register_cfn(m, "exp", -1, quo__mod_math_exp);
+  quo_module_register_cfn(m, "log", -1, quo__mod_math_log);
+  quo_module_register_cfn(m, "log2", -1, quo__mod_math_log2);
+  quo_module_register_cfn(m, "log10", -1, quo__mod_math_log10);
+  quo_module_register_cfn(m, "sin", -1, quo__mod_math_sin);
+  quo_module_register_cfn(m, "cos", -1, quo__mod_math_cos);
+  quo_module_register_cfn(m, "tan", -1, quo__mod_math_tan);
+  quo_module_register_cfn(m, "asin", -1, quo__mod_math_asin);
+  quo_module_register_cfn(m, "acos", -1, quo__mod_math_acos);
+  quo_module_register_cfn(m, "atan", -1, quo__mod_math_atan);
+  quo_module_register_cfn(m, "atan2", -1, quo__mod_math_atan2);
+  quo_module_register_cfn(m, "sinh", -1, quo__mod_math_sinh);
+  quo_module_register_cfn(m, "cosh", -1, quo__mod_math_cosh);
+  quo_module_register_cfn(m, "tanh", -1, quo__mod_math_tanh);
+  quo_module_register_cfn(m, "min", -1, quo__mod_math_min);
+  quo_module_register_cfn(m, "max", -1, quo__mod_math_max);
+  quo_module_register_cfn(m, "clamp", -1, quo__mod_math_clamp);
+  quo_module_register_cfn(m, "random", -1, quo__mod_math_random);
+  quo_module_register_cfn(m, "random_float", -1, quo__mod_math_random_float);
+  quo_module_register_cfn(m, "deg_to_rad", -1, quo__mod_math_deg_to_rad);
+  quo_module_register_cfn(m, "rad_to_deg", -1, quo__mod_math_rad_to_deg);
+
+  quo_module_register_var(m, quo_str_new_interned("pi", -1), quo_var_new_num(3.1415926535897932384));
+  quo_module_register_var(m, quo_str_new_interned("e", -1), quo_var_new_num(2.7182818284590452354));
+  quo_module_register_var(m, quo_str_new_interned("tau", -1), quo_var_new_num(3.1415926535897932384 * 2));
 }
 
 // --- BUILT-IN GLOBAL FUNCTIONS --- //
@@ -3873,6 +5057,9 @@ void quo_init(const char *cwd) {
   quo__mod_base64_init(cwd);
   quo__mod_uuid_init(cwd);
   quo__mod_env_init(cwd);
+  quo__mod_fs_init(cwd);
+  quo__mod_json_init(cwd);
+  quo__mod_net_init(cwd);
 
 #undef REGISTER_BUILTIN_METHOD
 }
