@@ -9,4 +9,4 @@ grammar = "quo"
 
 [grammars.quo]
 repository = "https://github.com/quo-lang/tree-sitter-quo"
-rev = "dbb68b8056bc29ced1f0664eeeeb4db559fec3cc"
+rev = "0c31a1b4c28af8489b2553221f1dc8d14df23b78"
