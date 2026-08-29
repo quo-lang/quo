@@ -69,7 +69,7 @@
 [
     "var"
     "fn"
-    "loop"
+    "while"
     "break"
     "continue"
     "return"

@@ -1,6 +1,6 @@
 id = "quo"
 name = "Quo Language Support"
-version = "0.0.1"
+version = "0.0.2"
 schema_version = 1
 authors = ["Vlad Krupinskii <vladkrupinskii@gmail.com>"]
 description = "Syntax highlighting for Quo language"
@@ -9,4 +9,4 @@ grammar = "quo"
 
 [grammars.quo]
 repository = "https://github.com/quo-lang/tree-sitter-quo"
-rev = "8bec62bdf012f50597c2272046aabb6d4459e827"
+rev = "dbb68b8056bc29ced1f0664eeeeb4db559fec3cc"
