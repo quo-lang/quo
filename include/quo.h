@@ -143,7 +143,7 @@ typedef struct {
     // Keywords
     QUO_TT_VAR,      // var
     QUO_TT_FN,       // fn
-    QUO_TT_LOOP,     // loop
+    QUO_TT_WHILE,    // while
     QUO_TT_BREAK,    // break
     QUO_TT_CONTINUE, // continue
     QUO_TT_IF,       // if
@@ -280,9 +280,7 @@ struct QuoStmt {
       QuoStmt *else_branch; // Can be NULL or another if for elif
     } if_stmt;
     struct {
-      QuoStmt *initializer;
       QuoExpr *condition;
-      QuoStmt *increment;
       QuoStmt *body;
     } loop;              // Loop
     QuoStmtList block;   // Block statement (multiple statements)
@@ -590,7 +588,6 @@ typedef struct QuoCompiler {
   // Loop context for break/continue
   struct QuoLoopContext {
     int start;
-    int increment_start;
     da(int) breaks;
     da(int) continues;
   } *loop;
@@ -922,8 +919,8 @@ void quo_ht_free(QuoHashTable *t) {
 // -------------------- LEXER -------------------- //
 
 static enum QuoTokenType quo__keywords[] = {
-    QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_LOOP, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
-    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,  QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN,
+    QUO_TT_VAR,  QUO_TT_FN,    QUO_TT_WHILE, QUO_TT_BREAK, QUO_TT_CONTINUE, QUO_TT_IF,     QUO_TT_ELSE,
+    QUO_TT_TRUE, QUO_TT_FALSE, QUO_TT_NIL,   QUO_TT_AND,   QUO_TT_OR,       QUO_TT_RETURN,
 };
 static enum QuoTokenType quo__single_char_symbols[] = {
     QUO_TT_DOT,   QUO_TT_OPAREN, QUO_TT_CPAREN, QUO_TT_OBRACE, QUO_TT_CBRACE,   QUO_TT_OBRACKET, QUO_TT_CBRACKET,
@@ -1055,7 +1052,7 @@ const char *quo_token_type_str(enum QuoTokenType t) {
   case QUO_TT_COMMENT: str = "#"; break;
   case QUO_TT_VAR: str = "var"; break;
   case QUO_TT_FN: str = "fn"; break;
-  case QUO_TT_LOOP: str = "loop"; break;
+  case QUO_TT_WHILE: str = "while"; break;
   case QUO_TT_BREAK: str = "break"; break;
   case QUO_TT_CONTINUE: str = "continue"; break;
   case QUO_TT_IF: str = "if"; break;
@@ -2151,7 +2148,7 @@ static QuoParseRule quo__get_parse_rule(QuoToken t) {
   case QUO_TT_ERROR:
   case QUO_TT_COMMENT:
   case QUO_TT_VAR:
-  case QUO_TT_LOOP:
+  case QUO_TT_WHILE:
   case QUO_TT_BREAK:
   case QUO_TT_CONTINUE:
   case QUO_TT_IF:
@@ -2201,7 +2198,7 @@ static QuoParseRule quo__get_parse_rule(QuoToken t) {
 static QuoExpr *quo__parser_parse_precedence(QuoModule *m, enum QuoPrecedence precedence) {
   quo__parser_advance(m);
   QuoExpr *(*prefix)(QuoModule *) = quo__get_parse_rule(m->previous).prefix;
-  if (!prefix) quo__parser_error(m, m->previous, "Expected expression");
+  if (!prefix) return NULL;
   QuoExpr *left = prefix(m);
   while (precedence < quo__get_parse_rule(m->current).precedence) {
     quo__parser_advance(m);
@@ -2416,9 +2413,7 @@ static void quo__stmt_free(QuoStmt *stmt) {
     if (stmt->if_stmt.else_branch) quo__stmt_free(stmt->if_stmt.else_branch);
     break;
   case QUO_STMT_LOOP:
-    if (stmt->loop.initializer) quo__stmt_free(stmt->loop.initializer);
     if (stmt->loop.condition) quo__expr_free(stmt->loop.condition);
-    if (stmt->loop.increment) quo__stmt_free(stmt->loop.increment);
     if (stmt->loop.body) quo__stmt_free(stmt->loop.body);
     break;
   case QUO_STMT_BLOCK:
@@ -2499,28 +2494,33 @@ static QuoStmt *quo__parser_stmt(QuoModule *m) {
   }
 
   // Loop
-  else if (quo__parser_match(m, QUO_TT_LOOP)) {
+  else if (quo__parser_match(m, QUO_TT_WHILE)) {
     m->loop_count++;
-    quo__parser_expect(m, QUO_TT_OPAREN, "Expected '(' after 'loop'");
-    // Parse initializer (optional)
-    QuoStmt *initializer = NULL;
-    if (!quo__parser_check(m, QUO_TT_COMMA)) initializer = quo__parser_stmt(m);
-    quo__parser_expect(m, QUO_TT_COMMA, "Expected ',' after loop initializer");
-    // Parse condition (optional)
-    QuoExpr *condition = NULL;
-    if (!quo__parser_check(m, QUO_TT_COMMA)) condition = quo__parser_expression(m);
-    quo__parser_expect(m, QUO_TT_COMMA, "Expected ',' after loop condition");
-    // Parse increment (optional)
-    QuoStmt *increment = NULL;
-    if (!quo__parser_check(m, QUO_TT_CPAREN)) increment = quo__parser_stmt(m);
-    quo__parser_expect(m, QUO_TT_CPAREN, "Expected ')' after loop clauses");
-    // Parse body - either block or single statement
+    if (!quo__parser_match(m, QUO_TT_OPAREN)) {
+      quo__parser_error(m, m->current, "Expected '(' before condition");
+      m->loop_count--;
+      return NULL;
+    }
+    QuoExpr *condition = quo__parser_expression(m);
+    if (!condition) {
+      quo__parser_error(m, m->current, "Expected expression");
+      m->loop_count--;
+      return NULL;
+    }
+    if (!quo__parser_match(m, QUO_TT_CPAREN)) {
+      quo__parser_error(m, m->current, "Expected ')' after condition");
+      m->loop_count--;
+      return NULL;
+    }
     QuoStmt *body_stmt = quo__parser_stmt(m);
+    if (!body_stmt) {
+      quo__expr_free(condition);
+      m->loop_count--;
+      return NULL;
+    }
     QuoStmt *body = body_stmt->type != QUO_STMT_BLOCK ? quo__parser_wrap_stmt_in_block(m, body_stmt) : body_stmt;
     stmt = quo__stmt_new(QUO_STMT_LOOP);
-    stmt->loop.initializer = initializer;
     stmt->loop.condition = condition;
-    stmt->loop.increment = increment;
     stmt->loop.body = body;
     m->loop_count--;
   }
@@ -2887,50 +2887,33 @@ static void quo__compiler_stmt(QuoCompiler *c, QuoStmt *s) {
     struct QuoLoopContext *prev_loop = c->loop;
     c->loop = &loop_ctx;
     quo__compiler_begin_scope(c);
-    // Compile initializer if it exists (runs once before the loop)
-    if (s->loop.initializer) quo__compiler_stmt(c, s->loop.initializer);
     // Mark the start of the condition check
     int condition_start = da_count(&c->fn->instructions);
     loop_ctx.start = condition_start;
-    // Compile condition if it exists, otherwise default to true
+    // Compile condition
     int jump_to_end = 0;
-    if (s->loop.condition) {
-      quo__compiler_expr(c, s->loop.condition);
-      jump_to_end = quo__function_emit_jump(c->fn, QUO_OP_JUMP_IF_FALSE);
-      quo__function_push_instruction(c->fn, QUO_OP_POP);
-    }
-    // Compile the body
-    quo__compiler_stmt(c, s->loop.body);
-    // Mark the start of increment section (for continue patching)
-    int increment_start = da_count(&c->fn->instructions);
-    loop_ctx.increment_start = increment_start;
-    // Compile increment if it exists
-    if (s->loop.increment) {
-      quo__compiler_stmt(c, s->loop.increment);
-      quo__function_push_instruction(c->fn, QUO_OP_POP); // Discard increment result
-    }
-    // Jump back to condition check
-    quo__function_emit_loop(c->fn, condition_start);
-    // Patch the conditional jump to exit the loop
-    if (s->loop.condition) quo__function_patch_jump(c->fn, jump_to_end);
-    // Store the end position for break patching
-    int end_pos = da_count(&c->fn->instructions);
+    quo__compiler_expr(c, s->loop.condition);
+    jump_to_end = quo__function_emit_jump(c->fn, QUO_OP_JUMP_IF_FALSE);
+    quo__function_push_instruction(c->fn, QUO_OP_POP);
+    quo__compiler_stmt(c, s->loop.body);             // Compile the body
+    quo__function_emit_loop(c->fn, condition_start); // Jump back to condition check
+    quo__function_patch_jump(c->fn, jump_to_end);    // Patch the conditional jump to exit the loop
+    int end_pos = da_count(&c->fn->instructions);    // Store the end position for break patching
     // Patch all break jumps to this position (after the loop)
     for (int i = 0; i < da_count(&loop_ctx.breaks); i++) {
       int break_jump = da_at(&loop_ctx.breaks, i);
       int offset = end_pos - break_jump - 1;
       da_at(&c->fn->instructions, break_jump) = offset;
     }
-    // Patch all continue jumps to the increment section
+    // Patch all continue jumps to the condition section
     for (int i = 0; i < da_count(&loop_ctx.continues); i++) {
       int continue_jump = da_at(&loop_ctx.continues, i);
-      int offset = increment_start - continue_jump - 1;
+      int offset = condition_start - continue_jump - 1;
       da_at(&c->fn->instructions, continue_jump) = offset;
     }
     da_free(&loop_ctx.breaks);
     da_free(&loop_ctx.continues);
-    // Restore previous loop context
-    c->loop = prev_loop;
+    c->loop = prev_loop; // Restore previous loop context
     quo__compiler_end_scope(c);
     break;
   }
@@ -3650,21 +3633,9 @@ void quo_debug_statement_print(QuoStmt *stmt, int indent) {
     break;
   case QUO_STMT_LOOP:
     printf("LOOP:\n");
-    if (stmt->loop.initializer) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
-      printf("INIT:\n");
-      quo_debug_statement_print(stmt->loop.initializer, indent + 2);
-    }
-    if (stmt->loop.condition) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
-      printf("COND:\n");
-      quo_debug_expression_print(stmt->loop.condition, indent + 2);
-    }
-    if (stmt->loop.increment) {
-      for (int i = 0; i < indent + 1; i++) printf("  ");
-      printf("INCR:\n");
-      quo_debug_statement_print(stmt->loop.increment, indent + 2);
-    }
+    for (int i = 0; i < indent + 1; i++) printf("  ");
+    printf("COND:\n");
+    quo_debug_expression_print(stmt->loop.condition, indent + 2);
     for (int i = 0; i < indent + 1; i++) printf("  ");
     if (da_count(&stmt->loop.body->block) == 0) break;
     printf("BODY:\n");
