@@ -349,10 +349,10 @@ static inline void quo__mod_dl_cleanup(QuoModule *m) {
 
 // ---------- PUBLIC API ---------- //
 
-static inline void quo_mod_dl_init(QuoModule *parent) {
+static inline void quo_mod_dl_load(void) {
   dl__arena = quo_arena_create(1024);
 
-  QuoModule *m = quo_module_new(parent->cwd, "dl", NULL, quo__mod_dl_cleanup);
+  QuoModule *m = quo_module_new(NULL, "dl", NULL, quo__mod_dl_cleanup);
   quo_module_register_cfn(m, "open", -1, quo__mod_dl_open);
 
   QuoObj *dl_handle_type = quo_type_register("QuoDLHandle", sizeof(QuoDLHandle));

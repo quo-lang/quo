@@ -20,7 +20,7 @@ cmd() { echo "$@";"$@"; }
 build() {
     mkdir -p build
     CFLAGS="-Wall -Wextra"
-    LDFLAGS="-l:libffi.a"
+    LDFLAGS="-l:libffi.a -lcurl -lm"
     case $1 in
         release) CFLAGS="$CFLAGS -O3 -DNDEBUG" ;;
         debug) CFLAGS="$CFLAGS -DQUO_DEBUG -g" ;;

@@ -3,6 +3,12 @@
 
 // Include modules
 #include "../include/quo-mod-dl.h"
+#include "../include/quo-mod-fs.h"
+#include "../include/quo-mod-io.h"
+#include "../include/quo-mod-math.h"
+#include "../include/quo-mod-net.h"
+#include "../include/quo-mod-os.h"
+#include "../include/quo-mod-time.h"
 
 // #include "formatter.h"
 
@@ -59,7 +65,15 @@ static int quo__run(const char *path) {
     cwd = quo_dirname(path);
   }
 
-  quo_init(cwd);
+  quo_init();
+
+  quo_mod_io_load();
+  quo_mod_os_load();
+  quo_mod_math_load();
+  quo_mod_net_load();
+  quo_mod_dl_load();
+  quo_mod_time_load();
+  quo_mod_fs_load();
 
   QuoModule *m = quo_module_new(cwd, display_path, source, NULL);
   quo_dealloc(source);
@@ -71,9 +85,6 @@ static int quo__run(const char *path) {
     quo_cleanup();
     return 1;
   }
-
-  // Load modules
-  quo_mod_dl_init(m);
 
   int exit_code = 0;
   QuoVar result = quo_module_run(m);
