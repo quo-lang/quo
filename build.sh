@@ -124,7 +124,7 @@ case ${1-} in
   build)   shift ; build "$@" ;;
   run)     run   ;;
   tag)     tag   ;;
-  debug)   debug ;;
+  gdb)     gdb ;;
   dist)    dist  ;;
   test)    test  ;;
   stats)   stats ;;

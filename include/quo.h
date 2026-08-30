@@ -682,14 +682,18 @@ static inline bool quo_strprefix(const char *str, const char *prefix) {
   return memcmp(str, prefix, prefix_len) == 0;
 }
 
-char *quo_strndup(const char *str, int len) {
+static inline char *quo_strndup(const char *str, int len) {
+  if (str == NULL) return NULL;
   char *ptr = quo_alloc(NULL, len + 1);
   memcpy(ptr, str, len);
   ptr[len] = '\0';
   return ptr;
 }
 
-char *quo_strdup(const char *str) { return quo_strndup(str, strlen(str)); }
+static inline char *quo_strdup(const char *str) {
+  if (str == NULL) return NULL;
+  return quo_strndup(str, strlen(str));
+}
 
 char *quo_strdupf(const char *fmt, ...) {
   if (fmt == NULL) return NULL;
@@ -1241,7 +1245,7 @@ static QuoVar quo__builtin_import(QuoModule *m, int argc, QuoVar *argv) {
     QuoVar value;
     if (quo_ht_get(&quo__imported_modules, quo_str_new_interned(path->data, path->len), &value)) return value;
   }
-  char *mod_path = mod_path = quo_strdupf("%s/%.*s", m->cwd, path->len, path->data);
+  char *mod_path = quo_strdupf("%s/%.*s", m->cwd ? m->cwd : ".", path->len, path->data);
   char *mod_source = quo_read_file(mod_path);
   if (!mod_source) {
     quo_dealloc(mod_path);
@@ -1519,7 +1523,7 @@ static QuoObj *quo__method_lookup(QuoVar *val, QuoStr *name) {
 // --- MODULE --- //
 
 QuoModule *quo_module_new(const char *cwd, const char *file_path, const char *source, QuoModuleCleanupFn cleanup_fn) {
-  assert(cwd != NULL && file_path != NULL);
+  assert(file_path != NULL);
 
   QuoModule *m = (QuoModule *)quo_obj_new(sizeof(QuoModule));
   m->obj.type = QUO_OBJ_TYPE_MODULE;
