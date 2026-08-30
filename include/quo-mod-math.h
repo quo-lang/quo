@@ -1,3 +1,11 @@
+/*
+DESCRIPTION:
+    Math module for Quo. It's a wrapper around libm.
+
+DEPENDENCIES:
+    Add -lm to your linker flags.
+*/
+
 #pragma once
 
 #include "quo.h"
