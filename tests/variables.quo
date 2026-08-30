@@ -1,22 +1,22 @@
-var assert = fn(condition) if !condition exit(1)
+var dbg = import("debug")
 
 var a = "foo"
 var b = "bar"
 
-assert(a == "foo")
-assert(b == "bar")
-assert(a + b == "foobar")
+dbg.assert(a == "foo")
+dbg.assert(b == "bar")
+dbg.assert(a + b == "foobar")
 
 var c = b
 b = a
 
-assert(c == "bar")
-assert(b == "foo")
+dbg.assert(c == "bar")
+dbg.assert(b == "foo")
 
 # Reassign different types
 
 a = 69
 b = 4.20
 
-assert(a == 69)
-assert(b == 4.20)
+dbg.assert(a == 69)
+dbg.assert(b == 4.20)

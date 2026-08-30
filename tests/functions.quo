@@ -1,4 +1,4 @@
-var assert = fn(condition) if !condition exit(1)
+var dbg = import("debug")
 
 # Recursive Fibonacci
 var fib = fn(n) {
@@ -8,4 +8,4 @@ var fib = fn(n) {
     return fib(n - 1) + fib(n - 2)
 }
 
-assert(fib(10) == 55)
+dbg.assert(fib(10) == 55)

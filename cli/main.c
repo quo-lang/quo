@@ -2,6 +2,7 @@
 #include "../include/quo.h"
 
 // Include modules
+#include "../include/quo-mod-debug.h"
 #include "../include/quo-mod-dl.h"
 #include "../include/quo-mod-fs.h"
 #include "../include/quo-mod-io.h"
@@ -74,6 +75,7 @@ static int quo__run(const char *path) {
   quo_mod_dl_load();
   quo_mod_time_load();
   quo_mod_fs_load();
+  quo_mod_debug_load();
 
   QuoModule *m = quo_module_new(cwd, display_path, source, NULL);
   quo_dealloc(source);

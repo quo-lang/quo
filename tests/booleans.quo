@@ -1,16 +1,16 @@
-var assert = fn(condition) if !condition exit(1)
+var dbg = import("debug")
 
-assert(true == true)
-assert(false == false)
+dbg.assert(true == true)
+dbg.assert(false == false)
 
-assert(0 == false)
-assert(1 == true)
+dbg.assert(0 == false)
+dbg.assert(1 == true)
 
-assert(0.0 == false)
-assert(1.0 == true)
+dbg.assert(0.0 == false)
+dbg.assert(1.0 == true)
 
-assert("foo" == true)
-assert("" == false)
+dbg.assert("foo" == true)
+dbg.assert("" == false)
 
-assert(nil == false)
-assert(nil != true)
+dbg.assert(nil == false)
+dbg.assert(nil != true)

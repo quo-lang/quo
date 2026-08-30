@@ -1,4 +1,4 @@
-var assert = fn(condition) if !condition exit(1)
+var dbg = import("debug")
 
 # Variable shadowing within scopes
 var a = 69
@@ -6,8 +6,8 @@ var a = 69
     var a = 420
     {
         var a = 1337
-        assert(a == 1337)
+        dbg.assert(a == 1337)
     }
-    assert(a == 420)
+    dbg.assert(a == 420)
 }
-assert(a == 69)
+dbg.assert(a == 69)
