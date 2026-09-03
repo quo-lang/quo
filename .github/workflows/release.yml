@@ -18,7 +18,7 @@ jobs:
         run: sudo apt update && sudo apt install -y libffi-dev
 
       - name: Compile Quo CLI
-        run: ./build.sh dist
+        run: make dist
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
