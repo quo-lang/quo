@@ -722,7 +722,24 @@ char *quo_strdupf(const char *fmt, ...) {
   return buf;
 }
 
+double quo_strhextod(const char *s, int len) {
+  // Skip '0x' or '0X' prefix
+  if (len > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2, len -= 2;
+  char buffer[len + 1];
+  int buf_len = 0;
+  for (int i = 0; i < len; i++) {
+    char c = s[i];
+    if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) buffer[buf_len++] = c;
+    else if (c == '_') continue; // Skip underscores
+  }
+  buffer[buf_len] = '\0';
+  return (double)strtol(buffer, NULL, 16);
+}
+
+// Update quo_strtod to handle hex
 double quo_strtod(const char *s, int len) {
+  // Check for hex literal
+  if (len > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return quo_strhextod(s, len);
   char buffer[len + 1];
   buffer[0] = '\0';
   bool has_dot = false;
@@ -1810,20 +1827,48 @@ static QuoToken quo__lexer_next_token(QuoModule *m) {
       break;
     }
     // Number
-    else if (quo__is_digit(quo__lexer_peek(m, 0))) {
+    else if (quo__is_digit(quo__lexer_peek(m, 0)) ||
+             (quo__lexer_peek(m, 0) == '0' && (quo__lexer_peek(m, 1) == 'x' || quo__lexer_peek(m, 1) == 'X'))) {
       t.type = QUO_TT_LITERAL_NUM;
       size_t start = m->pos;
       t.start = m->source + start;
-      // Integer part
-      while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
-      // Float part
-      if (quo__lexer_peek(m, 0) == '.' && quo__lexer_peek(m, 1) != '\0' && quo__is_digit(quo__lexer_peek(m, 1))) {
-        quo__lexer_advance(m); // Skip '.'
+      // Check for hex literal
+      if (quo__lexer_peek(m, 0) == '0' && (quo__lexer_peek(m, 1) == 'x' || quo__lexer_peek(m, 1) == 'X')) {
+        quo__lexer_advance(m); // Skip '0'
+        quo__lexer_advance(m); // Skip 'x' or 'X'
+        // Hex digits
+        while (true) {
+          char c = quo__lexer_peek(m, 0);
+          if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '_') quo__lexer_advance(m);
+          else break;
+        }
+      } else {
+        // Regular decimal number
+        // Integer part
         while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+        // Float part
+        if (quo__lexer_peek(m, 0) == '.' && quo__lexer_peek(m, 1) != '\0' && quo__is_digit(quo__lexer_peek(m, 1))) {
+          quo__lexer_advance(m); // Skip '.'
+          while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+        }
       }
       t.len = m->pos - start;
       break;
     }
+    // else if (quo__is_digit(quo__lexer_peek(m, 0))) {
+    //   t.type = QUO_TT_LITERAL_NUM;
+    //   size_t start = m->pos;
+    //   t.start = m->source + start;
+    //   // Integer part
+    //   while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+    //   // Float part
+    //   if (quo__lexer_peek(m, 0) == '.' && quo__lexer_peek(m, 1) != '\0' && quo__is_digit(quo__lexer_peek(m, 1))) {
+    //     quo__lexer_advance(m); // Skip '.'
+    //     while (quo__is_digit(quo__lexer_peek(m, 0)) || quo__lexer_peek(m, 0) == '_') quo__lexer_advance(m);
+    //   }
+    //   t.len = m->pos - start;
+    //   break;
+    // }
     // String
     else if (quo__lexer_peek(m, 0) == '"') {
       t.type = QUO_TT_LITERAL_STR;
