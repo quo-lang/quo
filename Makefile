@@ -22,8 +22,9 @@ $(LIBFFI_TARGET): | $(BUILD_DIR)
 	tar -xzf $(LIBFFI_ARCHIVE) && rm -f $(LIBFFI_ARCHIVE) && \
 	cd libffi-$(LIBFFI_VER) && \
 	./configure --disable-shared --disable-docs && \
-	$(MAKE) && \
-	cp x86_64-pc-linux-gnu/.libs/$(LIBFFI_STATIC_LIB) ../
+	make && \
+	cp x86_64-pc-linux-gnu/.libs/$(LIBFFI_STATIC_LIB) ../ && \
+	rm -rf libffi-$(LIBFFI_VER)
 
 # ---------- QUO CLI ---------- #
 
@@ -65,10 +66,16 @@ check: $(QUO_CLI_TARGET)
 
 # ---------- DISTRIBUTION ---------- #
 
+DIST_DIR = $(BUILD_DIR)/dist
 DIST_ARCHIVE = quo-$(GIT_TAG)-linux.tar.gz
 
 dist: $(QUO_CLI_TARGET)
-	tar -czvf $(BUILD_DIR)/$(DIST_ARCHIVE) -C $(BUILD_DIR) quo -C .. include
+	@mkdir -p $(DIST_DIR)/bin $(DIST_DIR)/include/quo
+	@cp $(QUO_CLI_TARGET) $(DIST_DIR)/bin/
+	@cp include/*.h $(DIST_DIR)/include/quo/
+	@cd $(DIST_DIR) && tar -czf ../$(DIST_ARCHIVE) .
+	@rm -rf $(DIST_DIR)
+	@echo "Created $(BUILD_DIR)/$(DIST_ARCHIVE)"
 
 # ---------- RUN ---------- #
 
